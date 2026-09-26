@@ -148,8 +148,43 @@ J.STYLES = {
     bias: { layout: { circle: 1.8, ring: 1.6, pill: 1.4, tile: 1.4, vcols: 1.3 }, enter: { assemble: 1.4, blur: 1.4, zoom: 1.3 }, exit: { explode: 1.4, glitch: 1.4, blur: 1.2 } },
     decor: { rings: 1.4, hud: 0.6, dots: 1 }, hud: false,
   },
+  neon: {
+    name: 'ネオン・シアン', desc: '黒紺地・シアン×マゼンタ・強い色ズレと発光',
+    schemes: [
+      { bg: '#05070C', fg: '#00E5FF', sub: '#7DE8FF', accent: '#FF2BD6', accent2: '#00E5FF', ink: '#00E5FF', dim: '#0E1626', ghostA: '#FF2BD6', ghostB: '#00E5FF' },
+      { bg: '#0A0F1E', fg: '#FFFFFF', sub: '#9FB4FF', accent: '#00E5FF', accent2: '#FF2BD6', ink: '#FFFFFF', dim: '#141B33', ghostA: '#00E5FF', ghostB: '#FF2BD6' },
+      { bg: '#FF2BD6', fg: '#05070C', sub: '#3A0A30', accent: '#00E5FF', accent2: '#05070C', ink: '#05070C', dim: '#E01FC0', ghostA: '#00E5FF', ghostB: '#05070C' },
+    ],
+    fonts: { display: ['gothic_black', 'dela', 'zenkaku'], serif: ['mincho_bold'], body: ['gothic_med'], mono: ['mono', 'dot'] },
+    texture: { grain: 0.5, paper: 0, scan: 0.5 }, ghost: 1.15,
+    bias: { layout: { danmaku: 1.6, fillRepeat: 1.4, tile: 1.4, marquee: 1.3, condensed: 1.2, huge: 1.2 }, enter: { rapidFlash: 1.7, pixelIn: 1.5, scramble: 1.6, slice: 1.6, zoom: 1.2 }, exit: { glitch: 1.8, slice: 1.6, explode: 1.2 } },
+    decor: { hud: 1, sparks: 0.8, grid: 0.6 }, hud: true, glow: 1.6,
+  },
+  primary: {
+    name: '原色ポップ', desc: '白地×赤青黄の原色・丸ゴシックのポップ配色',
+    schemes: [
+      { bg: '#FFFFFF', fg: '#111111', sub: '#555555', accent: '#E8262A', accent2: '#1C4FE0', ink: '#111111', dim: '#F0F0F0', ghostA: '#E8262A', ghostB: '#1C4FE0' },
+      { bg: '#E8262A', fg: '#FFFFFF', sub: '#FFE58A', accent: '#1C4FE0', accent2: '#F5C400', ink: '#FFFFFF', dim: '#C81E22', ghostA: '#1C4FE0', ghostB: '#F5C400' },
+      { bg: '#1C4FE0', fg: '#FFFFFF', sub: '#BFD4FF', accent: '#F5C400', accent2: '#E8262A', ink: '#FFFFFF', dim: '#1740BE', ghostA: '#F5C400', ghostB: '#E8262A' },
+    ],
+    fonts: { display: ['round', 'pop', 'gothic_black'], serif: ['mincho_bold'], body: ['round', 'gothic_bold'], mono: ['mono'] },
+    texture: { grain: 0.25, paper: 0, scan: 0 }, ghost: 0.4,
+    bias: { layout: { huge: 1.6, pill: 1.6, wave: 1.5, scatter: 1.3, labels: 1.2, danmaku: 1.3 }, enter: { pop: 1.8, rapidFlash: 1.3, drop: 1.5, zoom: 1.2, spin: 1.3 }, exit: { scatter: 1.5, shrink: 1.3, stretch: 1.2 } },
+    decor: { dots: 1, shapes: 0.8, sparks: 0.8, counter: 0.6 }, hud: false,
+  },
+  digital: {
+    name: 'デジタル・グリーン', desc: '黒地・蛍光グリーン・走査線とドット文字',
+    schemes: [
+      { bg: '#050705', fg: '#39FF14', sub: '#8CFF6E', accent: '#D4FF3A', accent2: '#00FFAA', ink: '#39FF14', dim: '#0E140E', ghostA: '#39FF14', ghostB: '#00FFAA' },
+      { bg: '#020402', fg: '#B6FFB0', sub: '#39FF14', accent: '#00FFAA', accent2: '#39FF14', ink: '#B6FFB0', dim: '#0A130A', ghostA: '#00FFAA', ghostB: '#39FF14' },
+    ],
+    fonts: { display: ['dot', 'gothic_black', 'mono'], serif: ['mincho'], body: ['mono', 'gothic_med'], mono: ['mono', 'dot'] },
+    texture: { grain: 0.6, paper: 0, scan: 0.9 }, ghost: 0.6,
+    bias: { layout: { fillRepeat: 1.6, danmaku: 1.3, tile: 1.6, vcols: 1.3, type: 1.4, marquee: 1.2 }, enter: { pixelIn: 1.8, type: 1.4, scramble: 1.2, rapidFlash: 1.3 }, exit: { glitch: 1.6, slice: 1.3, drift: 1.2 } },
+    decor: { hud: 1, grid: 0.8, barcode: 0.6 }, hud: true,
+  },
 };
-J.STYLE_ORDER = ['noir', 'crimson', 'caution', 'magenta', 'paper', 'hud', 'mint', 'specimen', 'transit', 'blueprint', 'rouge', 'mono'];
+J.STYLE_ORDER = ['noir', 'crimson', 'caution', 'magenta', 'paper', 'hud', 'mint', 'specimen', 'transit', 'blueprint', 'rouge', 'mono', 'neon', 'primary', 'digital'];
 
 /* resolve style + user colour/font overrides into an effective style */
 J.resolveStyle = (project) => {

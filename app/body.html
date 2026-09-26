@@ -90,6 +90,7 @@
         <div class="easy-hero">
           <button id="btnOmakaseBig" class="omakase">おまかせで作る</button>
           <p class="hint">押すたびに、スタイル・雰囲気・動き・配色・構成がまるごと変わります。キーボードの <span class="kbd">R</span> でも実行できます。</p>
+          <div class="fields"><label class="field">雰囲気<select id="moodLock" title="固定すると、おまかせは常にこの雰囲気になります"></select></label></div>
           <div class="hist-row">
             <button id="btnPrev2" class="ghost">◀ 前の案</button>
             <span id="histPos" class="muted mono"></span>
@@ -110,6 +111,19 @@
           </div>
         </div>
         <div class="easy-sec">
+          <h3>写真</h3>
+          <label class="check"><input id="phOn" type="checkbox"><span>写真PVモード<small>読み込んだ写真を背景に切り替えながら表示します</small></span></label>
+          <div class="row" style="margin-top:6px">
+            <label class="file">写真を追加<input id="phAdd" type="file" accept="image/*" multiple></label>
+            <span id="phCount" class="muted mono">0枚</span>
+          </div>
+          <div class="fields" style="margin-top:8px">
+            <label class="field">切替単位<select id="phUnit"><option value="line">行ごと</option><option value="cut">カットごと</option><option value="beat">拍ごと</option><option value="even">均等割り</option></select></label>
+          </div>
+          <div class="slider"><label for="phDim">暗さ</label><input id="phDim" type="range" min="0" max="0.9" step="0.01"><output id="phDimOut"></output></div>
+          <div id="phProgress" class="row" hidden style="margin-top:6px"><div class="progress" style="flex:1"><i class="exp-bar" id="phBar"></i></div><span id="phProgText" class="muted mono">—</span></div>
+        </div>
+        <div class="easy-sec">
           <h3>書き出し</h3>
           <div class="fields">
             <label class="field">画面比<select id="eAspect"><option value="16:9">16:9</option><option value="9:16">9:16 縦</option><option value="4:3">4:3</option><option value="3:4">3:4 縦</option><option value="1:1">1:1</option><option value="4:5">4:5 縦</option><option value="21:9">21:9</option></select></label>
@@ -127,6 +141,7 @@
         <button role="tab" data-tab="style" aria-selected="true">スタイル</button>
         <button role="tab" data-tab="fx" aria-selected="false">演出</button>
         <button role="tab" data-tab="tech" aria-selected="false">手法</button>
+        <button role="tab" data-tab="photo" aria-selected="false">写真</button>
         <button role="tab" data-tab="out" aria-selected="false">書き出し</button>
       </nav>
 
@@ -168,6 +183,27 @@
       <div class="tabpane" data-pane="tech" hidden>
         <div class="row" style="margin-bottom:10px"><input id="techFilter" type="text" placeholder="手法を名前で絞り込み" style="flex:1" aria-label="手法を名前で絞り込み"><span id="techTotal" class="muted mono"></span></div>
         <div id="techLists"></div>
+      </div>
+
+      <div class="tabpane" data-pane="photo" hidden>
+        <label class="check"><input id="phOnPro" type="checkbox"><span>写真PVモード<small>読み込んだ写真を行・カット・拍などの単位で背景に切り替え表示します</small></span></label>
+        <div class="row" style="margin-top:8px">
+          <label class="file">写真を追加<input id="phAddPro" type="file" accept="image/*" multiple></label>
+          <span id="phCountPro" class="muted mono">0枚</span>
+          <button id="phShuffle" class="ghost small">シャッフル</button>
+          <button id="phClearAll" class="ghost small">すべて削除</button>
+        </div>
+        <div id="phProgressPro" class="row" hidden style="margin-top:6px"><div class="progress" style="flex:1"><i class="exp-bar" id="phBarPro"></i></div><span id="phProgTextPro" class="muted mono">—</span></div>
+        <div class="fields" style="margin-top:10px">
+          <label class="field">切替単位<select id="phUnitPro"><option value="line">行ごと</option><option value="cut">カットごと</option><option value="beat">拍ごと</option><option value="even">均等割り</option></select></label>
+          <label class="field">拍ごと<select id="phBeatsPer"><option value="1">1拍</option><option value="2">2拍</option><option value="4">4拍</option><option value="8">8拍</option></select></label>
+        </div>
+        <p class="note">写真の枚数が切替の回数より少ない場合はくり返し使われます。多い場合は余った分は使われません。</p>
+        <div class="slider"><label for="phDimPro">暗さ</label><input id="phDimPro" type="range" min="0" max="0.9" step="0.01"><output id="phDimProOut"></output></div>
+        <div class="slider"><label for="phFade">切替の長さ</label><input id="phFade" type="range" min="0" max="1.5" step="0.05"><output id="phFadeOut"></output></div>
+        <label class="row" style="gap:6px;margin-top:6px"><input id="phKenBurns" type="checkbox"> ゆっくりズーム（Ken Burns）</label>
+        <h3>写真一覧</h3>
+        <div id="phGrid" class="ph-grid"></div>
       </div>
 
       <div class="tabpane" data-pane="out" hidden>

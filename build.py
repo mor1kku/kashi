@@ -17,11 +17,11 @@ html = f'''<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>JIZURA 字面</title>
 <meta name="description" content="歌詞を入れると文字PV（リリックモーション）を自動で組み立てて MP4 に書き出すブラウザアプリ">
-<link rel="canonical" href="https://852wa.github.io/JIZURA/">
+<link rel="canonical" href="https://mor1kku.github.io/kashi/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="JIZURA 字面 — 文字PV自動構成ツール">
 <meta property="og:description" content="歌詞を入れると文字PV（リリックモーション）を自動で組み立てて MP4 に書き出すブラウザアプリ">
-<meta property="og:url" content="https://852wa.github.io/JIZURA/">
+<meta property="og:url" content="https://mor1kku.github.io/kashi/">
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

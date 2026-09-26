@@ -43,7 +43,14 @@ function mergeProject(p) {
   o.fonts = (p && p.fonts) || {};
   o.userFonts = (p && p.userFonts) || [];
   for (const uf of o.userFonts) if (!J.FONTS[uf.key]) J.addUserFont(uf.key, uf.label, uf.family, uf.weight || 400);
+  o.photo = Object.assign(J.defaultProject().photo, (p && p.photo) || {});
   return o;
+}
+// 保存されたプロジェクトが参照している写真idのうち、IndexedDBに実体が無いものを取り除く
+async function reconcilePhotos() {
+  const ids = S.project.photo.ids; if (!ids || !ids.length) return;
+  const { ids: kept, missing } = await J.photo.filterExisting(ids);
+  if (missing) { S.project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
 }
 function loadLocal() { try { const s = localStorage.getItem(LS_KEY); if (s) return mergeProject(JSON.parse(s)); } catch (e) {} return mergeProject(null); }
 let saveTimer = 0;
@@ -396,7 +403,7 @@ function restartPreview() { seek(0); if (!S.playing && S.mode === 'easy') play()
 function omakase() {
   if (S.exporting || S.tap) return;
   remember();
-  const r = J.omakase(S.project);
+  const r = J.omakase(S.project, Math.random, S.project.moodLock ? { mood: S.project.moodLock } : undefined);
   Object.assign(S.project, r);
   fontKey = ''; syncUI(); replan(); commit();
   toast(`おまかせ：${J.STYLES[r.style].name} × ${J.MOODS[r.mood].name}`, r.colors.accentOn ? [r.colors.accent, r.colors.ghostA, r.colors.ghostB] : null);
@@ -414,7 +421,7 @@ function rerollPart(part) {
     P.colors.enabled = false;
     msg = `スタイル：${J.STYLES[P.style].name}`;
   } else if (part === 'mood') {
-    const r = J.omakase(P);
+    const r = J.omakase(P, Math.random, P.moodLock ? { mood: P.moodLock } : undefined);
     Object.assign(P, { mood: r.mood, fx: r.fx, enabled: r.enabled });
     msg = `雰囲気：${J.MOODS[r.mood].name}`;
   } else if (part === 'cut') {
@@ -448,6 +455,64 @@ function toast(m, cols) {
   el.hidden = false; el.classList.remove('out'); void el.offsetWidth; el.classList.add('in');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.classList.remove('in'); el.classList.add('out'); toastTimer = setTimeout(() => { el.hidden = true; }, 260); }, 1700);
+}
+
+/* ---------------- 写真PV ---------------- */
+function phSyncUI() {
+  const p = S.project.photo;
+  $('phOn').checked = !!p.on; $('phOnPro').checked = !!p.on;
+  $('phUnit').value = p.unit; $('phUnitPro').value = p.unit;
+  $('phBeatsPer').value = String(p.beatsPer);
+  $('phDim').value = p.dim; $('phDimOut').textContent = Math.round(p.dim * 100) + '%';
+  $('phDimPro').value = p.dim; $('phDimProOut').textContent = Math.round(p.dim * 100) + '%';
+  $('phFade').value = p.fade; $('phFadeOut').textContent = (+p.fade).toFixed(2) + 's';
+  $('phKenBurns').checked = p.kenBurns !== false;
+  const n = p.ids.length;
+  $('phCount').textContent = n + '枚'; $('phCountPro').textContent = n + '枚';
+  renderPhotoGrid();
+}
+function renderPhotoGrid() {
+  const grid = $('phGrid'); if (!grid) return;
+  grid.innerHTML = '';
+  const ids = S.project.photo.ids;
+  ids.forEach((id, i) => {
+    const div = document.createElement('div'); div.className = 'ph-item';
+    div.innerHTML = '<img alt="">'
+      + '<button class="icon ghost ph-x" title="削除">×</button>'
+      + '<span class="ph-mv l"><button class="ghost small" title="前へ">▲</button></span>'
+      + '<span class="ph-mv r"><button class="ghost small" title="次へ">▼</button></span>';
+    grid.appendChild(div);
+    J.photo.thumbURL(id).then(url => { if (url) div.querySelector('img').src = url; });
+    div.querySelector('.ph-x').addEventListener('click', async () => {
+      await J.photo.remove(id);
+      S.project.photo.ids = S.project.photo.ids.filter(x => x !== id);
+      phSyncUI(); photoChanged();
+    });
+    div.querySelector('.ph-mv.l button').addEventListener('click', () => movePhoto(i, -1));
+    div.querySelector('.ph-mv.r button').addEventListener('click', () => movePhoto(i, 1));
+  });
+}
+function movePhoto(i, d) {
+  const ids = S.project.photo.ids, j = i + d; if (j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]]; renderPhotoGrid(); photoChanged();
+}
+function photoChanged() { autosave(); replan(); } // 並び順・単位など、構成に影響する設定の変更後に呼ぶ
+async function addPhotoFiles(files) {
+  if (!files || !files.length) return;
+  const boxes = [$('phProgress'), $('phProgressPro')].filter(Boolean);
+  boxes.forEach(b => { b.hidden = false; });
+  try {
+    const ids = await J.photo.addFiles(files, (p, m) => {
+      const pct = (p * 100).toFixed(0) + '%';
+      const bar = $('phBar'), barPro = $('phBarPro'), txt = $('phProgText'), txtPro = $('phProgTextPro');
+      if (bar) bar.style.width = pct; if (barPro) barPro.style.width = pct;
+      if (txt) txt.textContent = m; if (txtPro) txtPro.textContent = m;
+    });
+    S.project.photo.ids = S.project.photo.ids.concat(ids);
+    if (ids.length) S.project.photo.on = true;
+    phSyncUI(); photoChanged();
+    if (ids.length) toast(`写真 ${ids.length}枚を追加`);
+  } finally { boxes.forEach(b => { b.hidden = true; }); }
 }
 
 /* ---------------- かんたん / 詳細 ---------------- */
@@ -599,7 +664,8 @@ function syncUI() {
   $('offset').value = S.project.timing.offset ?? 0.4;
   $('lineScale').value = S.project.timing.lineScale ?? 1;
   $('snap').checked = !!S.project.timing.snap;
-  renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid();
+  $('moodLock').value = S.project.moodLock || '';
+  renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid(); phSyncUI();
 }
 
 /* ---------------- wiring ---------------- */
@@ -612,6 +678,9 @@ function bind() {
   $('offset').addEventListener('change', e => { S.project.timing.offset = Math.max(0, parseFloat(e.target.value) || 0); replan(); });
   $('lineScale').addEventListener('change', e => { S.project.timing.lineScale = J.clamp(parseFloat(e.target.value) || 1, 0.3, 4); replan(); });
   $('snap').addEventListener('change', e => { S.project.timing.snap = e.target.checked; replan(); });
+  // 雰囲気ロック：固定すると、以後の「おまかせ」は常にこの雰囲気を使う
+  $('moodLock').innerHTML = '<option value="">おまかせ（毎回変える）</option>' + Object.keys(J.MOODS).map(k => `<option value="${k}">${escapeHtml(J.MOODS[k].name)}</option>`).join('');
+  $('moodLock').addEventListener('change', e => { S.project.moodLock = e.target.value || null; autosave(); });
   $('btnResetTimes').addEventListener('click', () => { S.project.timing.lineTimes = {}; replan(); });
   $('audioFile').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
@@ -694,12 +763,57 @@ function bind() {
   $('eCut').addEventListener('click', () => rerollPart('cut'));
   $('ePalette').addEventListener('click', () => { randomPalette(); restartPreview(); });
   $('btnSave').addEventListener('click', () => J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)));
-  $('btnAE').addEventListener('click', () => J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1)));
+  $('btnAE').addEventListener('click', () => {
+    if (S.plan.photo && S.plan.photo.on) toast('写真PVモードの写真はAE用データには含まれません');
+    J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1));
+  });
   $('fileProject').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    try { S.project = mergeProject(JSON.parse(await f.text())); syncUI(); replan(); }
+    try { S.project = mergeProject(JSON.parse(await f.text())); syncUI(); replan(); reconcilePhotos(); }
     catch (err) { showMsg('プロジェクトを読み込めませんでした'); setTimeout(() => showMsg(null), 2500); }
     e.target.value = '';
+  });
+  // 写真PV
+  J.photoNotify = toast;
+  J.photoOnLoad = () => { S.need = true; };
+  $('phOn').addEventListener('change', e => { S.project.photo.on = e.target.checked; $('phOnPro').checked = e.target.checked; photoChanged(); });
+  $('phOnPro').addEventListener('change', e => { S.project.photo.on = e.target.checked; $('phOn').checked = e.target.checked; photoChanged(); });
+  $('phAdd').addEventListener('change', e => { addPhotoFiles(e.target.files); e.target.value = ''; });
+  $('phAddPro').addEventListener('change', e => { addPhotoFiles(e.target.files); e.target.value = ''; });
+  $('phUnit').addEventListener('change', e => { S.project.photo.unit = e.target.value; $('phUnitPro').value = e.target.value; photoChanged(); });
+  $('phUnitPro').addEventListener('change', e => { S.project.photo.unit = e.target.value; $('phUnit').value = e.target.value; photoChanged(); });
+  $('phBeatsPer').addEventListener('change', e => { S.project.photo.beatsPer = +e.target.value; photoChanged(); });
+  $('phDim').addEventListener('input', e => {
+    S.project.photo.dim = +e.target.value; $('phDimOut').textContent = Math.round(e.target.value * 100) + '%';
+    $('phDimPro').value = e.target.value; $('phDimProOut').textContent = Math.round(e.target.value * 100) + '%';
+    replanSoon(120);
+  });
+  $('phDimPro').addEventListener('input', e => {
+    S.project.photo.dim = +e.target.value; $('phDimProOut').textContent = Math.round(e.target.value * 100) + '%';
+    $('phDim').value = e.target.value; $('phDimOut').textContent = Math.round(e.target.value * 100) + '%';
+    replanSoon(120);
+  });
+  $('phFade').addEventListener('input', e => { S.project.photo.fade = +e.target.value; $('phFadeOut').textContent = (+e.target.value).toFixed(2) + 's'; replanSoon(120); });
+  $('phKenBurns').addEventListener('change', e => { S.project.photo.kenBurns = e.target.checked; replan(); });
+  $('phShuffle').addEventListener('click', () => {
+    const ids = S.project.photo.ids;
+    for (let i = ids.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    renderPhotoGrid(); photoChanged();
+  });
+  $('phClearAll').addEventListener('click', async () => {
+    if (!S.project.photo.ids.length) return;
+    if (!confirm('写真をすべて削除しますか？')) return;
+    await J.photo.removeAll(S.project.photo.ids);
+    S.project.photo.ids = [];
+    phSyncUI(); photoChanged();
+  });
+  ['dragover', 'drop'].forEach(evt => $('app').addEventListener(evt, e => {
+    if (e.dataTransfer && [...(e.dataTransfer.items || [])].some(it => it.kind === 'file')) e.preventDefault();
+  }));
+  $('app').addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files; if (!files || !files.length) return;
+    const imgs = [...files].filter(f => /^image\//.test(f.type));
+    if (imgs.length) addPhotoFiles(imgs);
   });
   document.addEventListener('keydown', e => {
     const tag = (e.target && e.target.tagName) || '';
@@ -719,7 +833,7 @@ function bind() {
 /* ---------------- boot ---------------- */
 function boot() {
   S.project = loadLocal();
-  bind(); syncUI(); replan();
+  bind(); syncUI(); replan(); reconcilePhotos();
   let mode = 'easy'; try { mode = localStorage.getItem('jizura.mode') || 'easy'; } catch (e) {}
   setMode(mode); commit();
   // open on a representative frame (end of the first cut's entrance)

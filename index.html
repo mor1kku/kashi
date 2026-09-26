@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>JIZURA 字面</title>
 <meta name="description" content="歌詞を入れると文字PV（リリックモーション）を自動で組み立てて MP4 に書き出すブラウザアプリ">
-<link rel="canonical" href="https://852wa.github.io/JIZURA/">
+<link rel="canonical" href="https://mor1kku.github.io/kashi/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="JIZURA 字面 — 文字PV自動構成ツール">
 <meta property="og:description" content="歌詞を入れると文字PV（リリックモーション）を自動で組み立てて MP4 に書き出すブラウザアプリ">
-<meta property="og:url" content="https://852wa.github.io/JIZURA/">
+<meta property="og:url" content="https://mor1kku.github.io/kashi/">
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -139,7 +139,7 @@ button.play { width: 40px; height: 34px; padding: 0; font-size: 14px; }
 .hint { font-size: 12px; color: var(--muted); }
 
 /* ---------- right panel ---------- */
-.tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
+.tabs { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
 .tabs button { border: 0; border-radius: 0; background: transparent; padding: 11px 4px; color: var(--muted); border-bottom: 2px solid transparent; }
 .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--amber); }
 .tabpane { padding: 14px 16px 24px; }
@@ -230,6 +230,16 @@ button.omakase:disabled { box-shadow: none; }
 }
 .toast.in { opacity: 1; transform: translate(-50%, 0); }
 .toast.out { opacity: 0; transform: translate(-50%, -6px); }
+
+/* ---------- 写真PV ---------- */
+.ph-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.ph-item { position: relative; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--raised); }
+.ph-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--raised2); }
+.ph-item .ph-x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; line-height: 18px; font-size: 12px; border-radius: 50%; }
+.ph-item .ph-mv { position: absolute; bottom: 2px; display: flex; gap: 2px; }
+.ph-item .ph-mv.l { left: 2px; }
+.ph-item .ph-mv.r { right: 2px; }
+.ph-item .ph-mv button { padding: 1px 5px; font-size: 10px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
@@ -345,6 +355,7 @@ button.omakase:disabled { box-shadow: none; }
         <div class="easy-hero">
           <button id="btnOmakaseBig" class="omakase">おまかせで作る</button>
           <p class="hint">押すたびに、スタイル・雰囲気・動き・配色・構成がまるごと変わります。キーボードの <span class="kbd">R</span> でも実行できます。</p>
+          <div class="fields"><label class="field">雰囲気<select id="moodLock" title="固定すると、おまかせは常にこの雰囲気になります"></select></label></div>
           <div class="hist-row">
             <button id="btnPrev2" class="ghost">◀ 前の案</button>
             <span id="histPos" class="muted mono"></span>
@@ -365,6 +376,19 @@ button.omakase:disabled { box-shadow: none; }
           </div>
         </div>
         <div class="easy-sec">
+          <h3>写真</h3>
+          <label class="check"><input id="phOn" type="checkbox"><span>写真PVモード<small>読み込んだ写真を背景に切り替えながら表示します</small></span></label>
+          <div class="row" style="margin-top:6px">
+            <label class="file">写真を追加<input id="phAdd" type="file" accept="image/*" multiple></label>
+            <span id="phCount" class="muted mono">0枚</span>
+          </div>
+          <div class="fields" style="margin-top:8px">
+            <label class="field">切替単位<select id="phUnit"><option value="line">行ごと</option><option value="cut">カットごと</option><option value="beat">拍ごと</option><option value="even">均等割り</option></select></label>
+          </div>
+          <div class="slider"><label for="phDim">暗さ</label><input id="phDim" type="range" min="0" max="0.9" step="0.01"><output id="phDimOut"></output></div>
+          <div id="phProgress" class="row" hidden style="margin-top:6px"><div class="progress" style="flex:1"><i class="exp-bar" id="phBar"></i></div><span id="phProgText" class="muted mono">—</span></div>
+        </div>
+        <div class="easy-sec">
           <h3>書き出し</h3>
           <div class="fields">
             <label class="field">画面比<select id="eAspect"><option value="16:9">16:9</option><option value="9:16">9:16 縦</option><option value="4:3">4:3</option><option value="3:4">3:4 縦</option><option value="1:1">1:1</option><option value="4:5">4:5 縦</option><option value="21:9">21:9</option></select></label>
@@ -382,6 +406,7 @@ button.omakase:disabled { box-shadow: none; }
         <button role="tab" data-tab="style" aria-selected="true">スタイル</button>
         <button role="tab" data-tab="fx" aria-selected="false">演出</button>
         <button role="tab" data-tab="tech" aria-selected="false">手法</button>
+        <button role="tab" data-tab="photo" aria-selected="false">写真</button>
         <button role="tab" data-tab="out" aria-selected="false">書き出し</button>
       </nav>
 
@@ -423,6 +448,27 @@ button.omakase:disabled { box-shadow: none; }
       <div class="tabpane" data-pane="tech" hidden>
         <div class="row" style="margin-bottom:10px"><input id="techFilter" type="text" placeholder="手法を名前で絞り込み" style="flex:1" aria-label="手法を名前で絞り込み"><span id="techTotal" class="muted mono"></span></div>
         <div id="techLists"></div>
+      </div>
+
+      <div class="tabpane" data-pane="photo" hidden>
+        <label class="check"><input id="phOnPro" type="checkbox"><span>写真PVモード<small>読み込んだ写真を行・カット・拍などの単位で背景に切り替え表示します</small></span></label>
+        <div class="row" style="margin-top:8px">
+          <label class="file">写真を追加<input id="phAddPro" type="file" accept="image/*" multiple></label>
+          <span id="phCountPro" class="muted mono">0枚</span>
+          <button id="phShuffle" class="ghost small">シャッフル</button>
+          <button id="phClearAll" class="ghost small">すべて削除</button>
+        </div>
+        <div id="phProgressPro" class="row" hidden style="margin-top:6px"><div class="progress" style="flex:1"><i class="exp-bar" id="phBarPro"></i></div><span id="phProgTextPro" class="muted mono">—</span></div>
+        <div class="fields" style="margin-top:10px">
+          <label class="field">切替単位<select id="phUnitPro"><option value="line">行ごと</option><option value="cut">カットごと</option><option value="beat">拍ごと</option><option value="even">均等割り</option></select></label>
+          <label class="field">拍ごと<select id="phBeatsPer"><option value="1">1拍</option><option value="2">2拍</option><option value="4">4拍</option><option value="8">8拍</option></select></label>
+        </div>
+        <p class="note">写真の枚数が切替の回数より少ない場合はくり返し使われます。多い場合は余った分は使われません。</p>
+        <div class="slider"><label for="phDimPro">暗さ</label><input id="phDimPro" type="range" min="0" max="0.9" step="0.01"><output id="phDimProOut"></output></div>
+        <div class="slider"><label for="phFade">切替の長さ</label><input id="phFade" type="range" min="0" max="1.5" step="0.05"><output id="phFadeOut"></output></div>
+        <label class="row" style="gap:6px;margin-top:6px"><input id="phKenBurns" type="checkbox"> ゆっくりズーム（Ken Burns）</label>
+        <h3>写真一覧</h3>
+        <div id="phGrid" class="ph-grid"></div>
       </div>
 
       <div class="tabpane" data-pane="out" hidden>
@@ -1277,8 +1323,43 @@ J.STYLES = {
     bias: { layout: { circle: 1.8, ring: 1.6, pill: 1.4, tile: 1.4, vcols: 1.3 }, enter: { assemble: 1.4, blur: 1.4, zoom: 1.3 }, exit: { explode: 1.4, glitch: 1.4, blur: 1.2 } },
     decor: { rings: 1.4, hud: 0.6, dots: 1 }, hud: false,
   },
+  neon: {
+    name: 'ネオン・シアン', desc: '黒紺地・シアン×マゼンタ・強い色ズレと発光',
+    schemes: [
+      { bg: '#05070C', fg: '#00E5FF', sub: '#7DE8FF', accent: '#FF2BD6', accent2: '#00E5FF', ink: '#00E5FF', dim: '#0E1626', ghostA: '#FF2BD6', ghostB: '#00E5FF' },
+      { bg: '#0A0F1E', fg: '#FFFFFF', sub: '#9FB4FF', accent: '#00E5FF', accent2: '#FF2BD6', ink: '#FFFFFF', dim: '#141B33', ghostA: '#00E5FF', ghostB: '#FF2BD6' },
+      { bg: '#FF2BD6', fg: '#05070C', sub: '#3A0A30', accent: '#00E5FF', accent2: '#05070C', ink: '#05070C', dim: '#E01FC0', ghostA: '#00E5FF', ghostB: '#05070C' },
+    ],
+    fonts: { display: ['gothic_black', 'dela', 'zenkaku'], serif: ['mincho_bold'], body: ['gothic_med'], mono: ['mono', 'dot'] },
+    texture: { grain: 0.5, paper: 0, scan: 0.5 }, ghost: 1.15,
+    bias: { layout: { danmaku: 1.6, fillRepeat: 1.4, tile: 1.4, marquee: 1.3, condensed: 1.2, huge: 1.2 }, enter: { rapidFlash: 1.7, pixelIn: 1.5, scramble: 1.6, slice: 1.6, zoom: 1.2 }, exit: { glitch: 1.8, slice: 1.6, explode: 1.2 } },
+    decor: { hud: 1, sparks: 0.8, grid: 0.6 }, hud: true, glow: 1.6,
+  },
+  primary: {
+    name: '原色ポップ', desc: '白地×赤青黄の原色・丸ゴシックのポップ配色',
+    schemes: [
+      { bg: '#FFFFFF', fg: '#111111', sub: '#555555', accent: '#E8262A', accent2: '#1C4FE0', ink: '#111111', dim: '#F0F0F0', ghostA: '#E8262A', ghostB: '#1C4FE0' },
+      { bg: '#E8262A', fg: '#FFFFFF', sub: '#FFE58A', accent: '#1C4FE0', accent2: '#F5C400', ink: '#FFFFFF', dim: '#C81E22', ghostA: '#1C4FE0', ghostB: '#F5C400' },
+      { bg: '#1C4FE0', fg: '#FFFFFF', sub: '#BFD4FF', accent: '#F5C400', accent2: '#E8262A', ink: '#FFFFFF', dim: '#1740BE', ghostA: '#F5C400', ghostB: '#E8262A' },
+    ],
+    fonts: { display: ['round', 'pop', 'gothic_black'], serif: ['mincho_bold'], body: ['round', 'gothic_bold'], mono: ['mono'] },
+    texture: { grain: 0.25, paper: 0, scan: 0 }, ghost: 0.4,
+    bias: { layout: { huge: 1.6, pill: 1.6, wave: 1.5, scatter: 1.3, labels: 1.2, danmaku: 1.3 }, enter: { pop: 1.8, rapidFlash: 1.3, drop: 1.5, zoom: 1.2, spin: 1.3 }, exit: { scatter: 1.5, shrink: 1.3, stretch: 1.2 } },
+    decor: { dots: 1, shapes: 0.8, sparks: 0.8, counter: 0.6 }, hud: false,
+  },
+  digital: {
+    name: 'デジタル・グリーン', desc: '黒地・蛍光グリーン・走査線とドット文字',
+    schemes: [
+      { bg: '#050705', fg: '#39FF14', sub: '#8CFF6E', accent: '#D4FF3A', accent2: '#00FFAA', ink: '#39FF14', dim: '#0E140E', ghostA: '#39FF14', ghostB: '#00FFAA' },
+      { bg: '#020402', fg: '#B6FFB0', sub: '#39FF14', accent: '#00FFAA', accent2: '#39FF14', ink: '#B6FFB0', dim: '#0A130A', ghostA: '#00FFAA', ghostB: '#39FF14' },
+    ],
+    fonts: { display: ['dot', 'gothic_black', 'mono'], serif: ['mincho'], body: ['mono', 'gothic_med'], mono: ['mono', 'dot'] },
+    texture: { grain: 0.6, paper: 0, scan: 0.9 }, ghost: 0.6,
+    bias: { layout: { fillRepeat: 1.6, danmaku: 1.3, tile: 1.6, vcols: 1.3, type: 1.4, marquee: 1.2 }, enter: { pixelIn: 1.8, type: 1.4, scramble: 1.2, rapidFlash: 1.3 }, exit: { glitch: 1.6, slice: 1.3, drift: 1.2 } },
+    decor: { hud: 1, grid: 0.8, barcode: 0.6 }, hud: true,
+  },
 };
-J.STYLE_ORDER = ['noir', 'crimson', 'caution', 'magenta', 'paper', 'hud', 'mint', 'specimen', 'transit', 'blueprint', 'rouge', 'mono'];
+J.STYLE_ORDER = ['noir', 'crimson', 'caution', 'magenta', 'paper', 'hud', 'mint', 'specimen', 'transit', 'blueprint', 'rouge', 'mono', 'neon', 'primary', 'digital'];
 
 /* resolve style + user colour/font overrides into an effective style */
 J.resolveStyle = (project) => {
@@ -2719,7 +2800,7 @@ J.defaultProject = () => ({
   version: 1,
   title: '', artist: '',
   lyrics: J.SAMPLE_LYRICS,
-  style: 'noir', mood: null,
+  style: 'noir', mood: null, moodLock: null,
   seed: 20260922,
   aspect: '16:9', res: 1080, fps: 24,
   fx: { motion: 0.7, glitch: 0.55, chroma: 0.7, decor: 0.5, density: 0.55, texture: 0.6, flash: true, onTwos: true, koma: 12, hud: 'auto', bgSwitch: 0.35 },
@@ -2728,6 +2809,7 @@ J.defaultProject = () => ({
   overrides: {},
   colors: { enabled: false },
   fonts: {},
+  photo: { on: false, ids: [], unit: 'line', beatsPer: 4, dim: 0.35, kenBurns: true, fade: 0.35 },
 });
 
 /* the original (After Effects-implemented) sets, captured before any expression pack registers */
@@ -3006,6 +3088,9 @@ J.plan = (project, audio) => {
   plan.events.sort((a, b) => a.t - b.t);
   plan.energy = audio && audio.energy ? audio.energy : null;
   plan.energyRate = audio && audio.energyRate ? audio.energyRate : 0;
+  // 写真PVモード：写真を背景に出す間は行ごとの背景グラフィックを消して写真を隠さないようにする
+  plan.photo = Object.assign({}, J.defaultProject().photo, project.photo || {}, { bpm: (project.timing && project.timing.bpm) || 0 });
+  if (plan.photo.on) plan.cuts.forEach(c => { c.bg = 'none'; });
   return plan;
 };
 
@@ -3190,6 +3275,8 @@ J.MOODS = {
     layout: ['huge', 'center', 'vcols', 'stack', 'condensed', 'mixed', 'circle'], enter: ['assemble', 'blur', 'zoom', 'wipe', 'slice'], exit: ['drift', 'explode', 'fall', 'blur'], styles: ['noir', 'paper', 'hud', 'mono', 'crimson'] },
   chaos:     { name: '全部入り', fx: { motion: [0.5, 1], glitch: [0.3, 1], chroma: [0.4, 1], decor: [0.4, 1], density: [0.45, 0.9], texture: [0.3, 1], bgSwitch: [0.3, 0.9] },
     layout: null, enter: null, exit: null, styles: null },
+  vocalo:    { name: 'ボカロ', fx: { motion: [0.75, 1], glitch: [0.45, 0.75], chroma: [0.5, 0.8], decor: [0.4, 0.7], density: [0.65, 0.95], texture: [0.3, 0.7], bgSwitch: [0.5, 0.85] },
+    layout: ['danmaku', 'fillRepeat', 'huge', 'scatter', 'marquee', 'center', 'tile', 'labels'], enter: ['rapidFlash', 'pixelIn', 'scramble', 'slice', 'pop'], exit: ['glitch', 'slice', 'explode', 'scatter'], styles: ['neon', 'primary', 'digital', 'crimson', 'magenta'] },
 };
 
 /* mood tags for the core (pre-pack) items */
@@ -3205,18 +3292,20 @@ J.MOODS = {
   for (const [g, map] of Object.entries(extra)) for (const [k, ms] of Object.entries(map)) ms.forEach(m => add(g, k, m));
 })();
 
-J.omakase = (project, rnd = Math.random) => {
+J.omakase = (project, rnd = Math.random, opts = {}) => {
   const pick = a => a[Math.floor(rnd() * a.length) % a.length];
   const range = r => +(r[0] + (r[1] - r[0]) * rnd()).toFixed(2);
+  // opts.mood: force a specific mood every time (雰囲気ロック), instead of excluding the current one and picking at random
+  const forced = opts.mood && J.MOODS[opts.mood] ? opts.mood : null;
   const moods = Object.keys(J.MOODS).filter(k => k !== project.mood);
-  const mood = pick(moods), M = J.MOODS[mood];
+  const mood = forced || pick(moods), M = J.MOODS[mood];
   // style: mostly one that suits the mood, sometimes anything; never the same twice in a row
   let pool = (M.styles && rnd() < 0.72 ? M.styles : J.STYLE_ORDER).filter(k => k !== project.style);
   if (!pool.length) pool = J.STYLE_ORDER.filter(k => k !== project.style);
   const style = pick(pool);
   const fx = Object.assign({}, project.fx);
   for (const k of Object.keys(M.fx)) fx[k] = range(M.fx[k]);
-  fx.koma = pick({ glitch: [12, 12, 8], pop: [12, 12, 8, 0], calm: [0, 0, 12], editorial: [0, 12], emotional: [12, 0], graphic: [12, 12, 0] }[mood] || [12, 8, 0]);
+  fx.koma = pick({ glitch: [12, 12, 8], pop: [12, 12, 8, 0], calm: [0, 0, 12], editorial: [0, 12], emotional: [12, 0], graphic: [12, 12, 0], vocalo: [12, 0, 0] }[mood] || [12, 8, 0]);
   fx.onTwos = fx.koma > 0; fx.flash = rnd() < 0.65; fx.hud = pick(['auto', 'auto', 'on', 'off']);
   // technique subset per group: everything tagged with the mood (plus the mood's hand-picked core items),
   // a sprinkle of everything else, and a minimum count so the planner always has room to vary
@@ -3346,6 +3435,10 @@ class Renderer {
         if (J.lum(sc.bg) < 0.4) ctx.filter = 'invert(1)';
         ctx.drawImage(this.paper(W, H), 0, 0, W, H);
         ctx.filter = 'none'; ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      }
+      // 写真PVモード：写真を背景として敷き、暗さのオーバーレイをかける（透過PNGには出さない）
+      if (plan.photo && plan.photo.on && plan.photo.ids && plan.photo.ids.length) {
+        try { J.photo.draw(ctx, plan, t, W, H, sc); } catch (e) { console.warn('photo', e); }
       }
     }
     // ---------- camera & chroma amounts ----------
@@ -3778,6 +3871,7 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
   for (let i = 0; i < total; i++) {
     if (signal && signal.aborted) { try { venc.close(); } catch (e) {} throw new Error('キャンセルしました'); }
     if (err) throw err;
+    if (plan.photo && plan.photo.on) await J.photo.ready(plan, i / fps);
     R.frame(ctx, plan, i / fps, { scale });
     const vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
     venc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
@@ -3847,6 +3941,7 @@ J.exportPNGZip = async ({ plan, project, transparent, onProgress, signal, every 
   const scale = w / plan.W;
   for (let i = 0; i < total; i += every) {
     if (signal && signal.aborted) throw new Error('キャンセルしました');
+    if (plan.photo && plan.photo.on && !transparent) await J.photo.ready(plan, i / fps); // 透過PNGには写真を出さないので待たない
     R.frame(ctx, plan, i / fps, { scale, transparent });
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
     zip.add(`jizura_${String(i).padStart(5, '0')}.png`, new Uint8Array(await blob.arrayBuffer()));
@@ -3861,12 +3956,12 @@ J.exportPNGZip = async ({ plan, project, transparent, onProgress, signal, every 
    closest original counterpart (the browser key is kept in web* fields so nothing is lost). */
 J.AE_MAP = {
   layout: { lowerThird: 'center', corners: 'mixed', staircase: 'mixed', zigzag: 'wave', arcTop: 'ring', spiral: 'ring', gridCells: 'labels', dropCap: 'mixed', justified: 'tile', frameBox: 'center', bubble: 'pill', subtitleBar: 'center', ticker: 'marquee', splitScreen: 'diag', mirror: 'stack', sideways: 'vcols', edgeFrame: 'marquee', perspective: 'stack', hanko: 'vcols', genkou: 'vcols', panels: 'diag', filmstrip: 'labels', quote: 'center', ruler: 'gloss', searchBar: 'type', chat: 'labels', notification: 'pill', ticket: 'pill',
-    rain: 'tile', hanging: 'scatter', orbit: 'ring', tunnel: 'tile', wordCloud: 'scatter', bounceLine: 'mixed', elastic: 'condensed', crossBands: 'diag', stickerBomb: 'labels', neon: 'center', keycaps: 'labels', bubbles: 'scatter', slotMachine: 'labels', flipBoard: 'labels', credits: 'type', zoomRepeat: 'stack', splitHalves: 'stack', columnsBig: 'vcols', circleWords: 'ring', dotMatrix: 'type', depthStack: 'stack', typeSpecimen: 'stack', kanjiFocus: 'huge', halfVertical: 'vcols', curtain: 'center', equalizer: 'mixed', tape: 'diag' },
-  enter: { riseMask: 'drop', dropMask: 'drop', slideL: 'wipe', slideR: 'wipe', slideWhole: 'stretch', flipX: 'spin', flipY: 'spin', domino: 'spin', fold: 'pop', unroll: 'wipe', strokeDraw: 'assemble', outlineFill: 'blur', splitJoin: 'slice', vSlice: 'slice', shutter: 'wipe', iris: 'zoom', diagWipe: 'wipe', blinds: 'slice', checker: 'flicker', randomOrder: 'flicker', bounceBig: 'drop', squashDrop: 'drop', rubber: 'stretch', glitchIn: 'scramble', echoIn: 'zoom', whip: 'stretch', skewIn: 'stretch', trackIn: 'blur', trackOut: 'blur', blurStagger: 'blur', fadeStagger: 'blur', waveIn: 'pop', spiralIn: 'spin', zoomOut: 'zoom', resolve: 'scramble', magnet: 'assemble', inkBleed: 'blur', neonOn: 'flicker', cursorSweep: 'type', stamp: 'zoom' },
+    rain: 'tile', hanging: 'scatter', orbit: 'ring', tunnel: 'tile', wordCloud: 'scatter', bounceLine: 'mixed', elastic: 'condensed', crossBands: 'diag', stickerBomb: 'labels', neon: 'center', keycaps: 'labels', bubbles: 'scatter', slotMachine: 'labels', flipBoard: 'labels', credits: 'type', zoomRepeat: 'stack', splitHalves: 'stack', columnsBig: 'vcols', circleWords: 'ring', dotMatrix: 'type', depthStack: 'stack', typeSpecimen: 'stack', kanjiFocus: 'huge', halfVertical: 'vcols', curtain: 'center', equalizer: 'mixed', tape: 'diag', danmaku: 'marquee', fillRepeat: 'tile' },
+  enter: { riseMask: 'drop', dropMask: 'drop', slideL: 'wipe', slideR: 'wipe', slideWhole: 'stretch', flipX: 'spin', flipY: 'spin', domino: 'spin', fold: 'pop', unroll: 'wipe', strokeDraw: 'assemble', outlineFill: 'blur', splitJoin: 'slice', vSlice: 'slice', shutter: 'wipe', iris: 'zoom', diagWipe: 'wipe', blinds: 'slice', checker: 'flicker', randomOrder: 'flicker', bounceBig: 'drop', squashDrop: 'drop', rubber: 'stretch', glitchIn: 'scramble', echoIn: 'zoom', whip: 'stretch', skewIn: 'stretch', trackIn: 'blur', trackOut: 'blur', blurStagger: 'blur', fadeStagger: 'blur', waveIn: 'pop', spiralIn: 'spin', zoomOut: 'zoom', resolve: 'scramble', magnet: 'assemble', inkBleed: 'blur', neonOn: 'flicker', cursorSweep: 'type', stamp: 'zoom', rapidFlash: 'flicker', pixelIn: 'scramble' },
   exit: { sinkMask: 'fall', riseOut: 'drift', slideOutL: 'stretch', slideOutR: 'stretch', flipOutX: 'shrink', flipOutY: 'fall', foldOut: 'shrink', squash: 'shrink', trackOutWide: 'blur', collapse: 'shrink', zoomThrough: 'blur', zoomFar: 'shrink', spinOut: 'scatter', twist: 'shrink', waveOut: 'scatter', blurOutStagger: 'blur', undraw: 'blur', outlineOut: 'blur', irisClose: 'shrink', diagWipeOut: 'wipe', blindsClose: 'slice', checkerOut: 'glitch', splitApart: 'slice', vSliceDrop: 'fall', melt: 'fall', dissolve: 'drift', backspace: 'wipe', scrambleOut: 'glitch', glitchDissolve: 'glitch', echoOut: 'blur', whipOut: 'stretch', gravity: 'fall', popOut: 'scatter', burn: 'drift', sweepCover: 'wipe', shatterLite: 'explode' },
-  hold: { float: 'drift', sway: 'wave', pulse: 'breathe', shimmer: 'still', colorRun: 'still', rotateSlow: 'drift', trackBreathe: 'breathe', skewWobble: 'wave', beatHop: 'wave', hWave: 'wave', heartbeat: 'breathe', orbitSmall: 'jitter', jelly: 'breathe', scanBand: 'glitchtick', noiseDrift: 'drift', tilt: 'drift', zoomSlow: 'drift', stretchPulse: 'breathe', glitchJump: 'glitchtick', echoTrail: 'drift' },
+  hold: { float: 'drift', sway: 'wave', pulse: 'breathe', shimmer: 'still', colorRun: 'still', rotateSlow: 'drift', trackBreathe: 'breathe', skewWobble: 'wave', beatHop: 'wave', hWave: 'wave', heartbeat: 'breathe', orbitSmall: 'jitter', jelly: 'breathe', scanBand: 'glitchtick', noiseDrift: 'drift', tilt: 'drift', zoomSlow: 'drift', stretchPulse: 'breathe', glitchJump: 'glitchtick', echoTrail: 'drift', beatBlink: 'glitchtick' },
   decor: { crosshair: 'brackets', cropMarks: 'brackets', reticle: 'rings', radar: 'rings', progressRing: 'rings', timecodeBar: 'barcode', rulerEdge: 'grid', dimension: 'leaders', indexNum: 'counter', dateStamp: 'barcode', qrBlock: 'barcode', glitchRects: 'bars', concentricSquares: 'shapes', triangleSpin: 'shapes', lineBurst: 'sparks', plusGrid: 'grid', guides: 'grid', waveLine: 'waveform', spiralLine: 'rings', halftonePatch: 'shapes', checkerStrip: 'stripes', beatRing: 'rings', orbitDots: 'dots', constellation: 'sparks', confetti: 'shapes', petals: 'shapes', rainStreaks: 'slash', snow: 'dots', lightLeak: 'blobs', bokeh: 'blobs', speedCorner: 'slash', risingParticles: 'sparks', twinkle: 'sparks', brushStroke: 'bars', tapePieces: 'bars', scribbleCircle: 'rings', scribbleUnder: 'slash', crossOut: 'slash', highlightMark: 'bars', heartsStars: 'shapes', watermarkKanji: 'counter', verticalStrip: 'leaders', romajiLine: 'leaders', bracketsJP: 'brackets', seal: 'shapes' },
-  fx: { rgbSplit: 'chroma', smear: 'slice', vhsRoll: 'slice', trackingNoise: 'slice', waveWarp: 'slice', pixelDrift: 'slice', tileShift: 'block', gridRepeat: 'block', mirrorFlash: 'block', strobe: 'invert', blackFrame: 'invert', whiteFrame: 'flash', filmBurn: 'flash', lightSweep: 'flash', panelWipe: 'flash', zoomPunch: 'zoom', whipBlur: 'zoom', posterize: 'mosaic', hueShift: 'chroma' },
+  fx: { rgbSplit: 'chroma', smear: 'slice', vhsRoll: 'slice', trackingNoise: 'slice', waveWarp: 'slice', pixelDrift: 'slice', tileShift: 'block', gridRepeat: 'block', mirrorFlash: 'block', strobe: 'invert', blackFrame: 'invert', whiteFrame: 'flash', filmBurn: 'flash', lightSweep: 'flash', panelWipe: 'flash', zoomPunch: 'zoom', whipBlur: 'zoom', posterize: 'mosaic', hueShift: 'chroma', pixelate: 'mosaic' },
 };
 const aeKey = (g, k, dflt) => (J.CORE_ORDER[g] && J.CORE_ORDER[g].includes(k)) || (g === 'layout' && (k === 'title' || k === 'interlude')) ? k : (J.AE_MAP[g][k] || dflt);
 J.planForAE = (plan, project) => {
@@ -12644,6 +12739,499 @@ fxReg('splitSlide', { name: '上下スライド', tags: ['graphic', 'pop', 'glit
   } });
 })();
 
+/* JIZURA pack: vocalo — ニコニコ動画/ボカロ曲PV風の演出（弾幕コメント・高速点滅・ドット化） */
+(() => {
+'use strict';
+const E = J.E;
+const P = 'vocalo';
+const reg = (g, k, d) => J.register(g, k, d, P);
+const clamp = J.clamp, DEG = J.DEG, TAU = J.TAU;
+const fontsOf = J.fontsOf;
+
+/* ================= LAYOUTS ================= */
+
+// ニコニコ風の定番コメント（歌詞の断片と混ぜて弾幕にする）
+const STOCK = ['888888', 'wwwwwww', 'ｷﾀ━━━(ﾟ∀ﾟ)━━━!!', 'うおおおお', '神', 'これは神曲', '中毒性', 'ここすき', 'たまらん', 'すごい', '最高'];
+
+reg('layout', 'danmaku', {
+  name: '弾幕', tags: ['pop', 'glitch', 'vocalo'], w: 0.85, busy: true, fits: n => n >= 1 && n <= 16,
+  plan(rng, cut, st) {
+    const lanesN = rng.int(5, 8);
+    const count = rng.int(11, 16);
+    const words = (cut.words && cut.words.length ? cut.words : [cut.lineText || cut.text]).filter(Boolean);
+    // レーンごとに速さを揃えて追い越しを防ぎ、同じレーン内は位相を等間隔にずらして重ならないようにする
+    const laneSpeed = Array.from({ length: lanesN }, () => rng.range(0.75, 1.35));
+    const perLane = Math.ceil(count / lanesN);
+    const comments = [];
+    for (let i = 0; i < count; i++) {
+      const useStock = !words.length || rng.chance(0.55);
+      const lane = i % lanesN, slot = Math.floor(i / lanesN);
+      comments.push({
+        lane,
+        text: useStock ? rng.pick(STOCK) : rng.pick(words),
+        speed: laneSpeed[lane],
+        size: rng.pick([0.6, 0.8, 1.0]),   // サイズを段階に揃えて字形キャッシュを効かせる
+        phase: (slot + rng.range(0, 0.35)) / perLane + J.r(lane, 77) * 0.5,   // 開始時点で画面内に散らばる
+        hot: useStock && rng.chance(0.4),
+      });
+    }
+    return { font: rng.pick(fontsOf(st, ['display', 'body'])), lanesN, comments, oy: rng.range(-0.02, 0.02) };
+  },
+  render(env) {
+    const { W, H, sc } = env, P2 = env.cut.params;
+    const text = J.splitLines(env.cut.text, W < H ? 6 : 12);
+    const size = Math.min(J.fitSize(text, P2.font, W * 0.72, H * 0.34, { lead: 1.15 }), H * 0.26);
+    const laneH = H / P2.lanesN;
+    const inA = E.outExpo(clamp(env.lt / 0.35)), outA = 1 - E.inCubic(env.pOut);
+    // コメントは歌詞の後ろに流して読みやすさを保つ（旧プランの delay 形式にも対応）
+    // 1レーンあたりのコメント数に応じて周回距離を伸ばし、縦長の狭い画面でも重ならないようにする
+    const perLane = Math.ceil(P2.comments.length / P2.lanesN);
+    const span = Math.max(W * 1.6, perLane * Math.min(W, H) * 0.95);
+    for (const c of P2.comments) {
+      const fs = Math.min(clamp(laneH * 0.58 * c.size, H * 0.018, H * 0.09), W * 0.07);
+      const vel = Math.max(W, span * 0.45) * 0.38 * c.speed;
+      const loop = span / vel;
+      const tt = c.phase != null ? ((env.ltb / loop + c.phase) % 1 + 1) % 1 * loop : ((env.ltb - c.delay) % loop + loop) % loop;
+      const x = W / 2 + span / 2 - vel * tt;
+      const y = laneH * (c.lane + 0.5);
+      env.draw({ text: c.text, font: P2.font, size: fs, x, y, color: c.hot ? sc.accent : sc.sub, alpha: 0.62 * inA * outA, ghost: false });
+    }
+    return J.mainDraw(env, { text, font: P2.font, size, x: W / 2, y: H / 2 + P2.oy * H, lead: 1.15, color: sc.fg, stroke: size * 0.14, strokeColor: sc.bg, strokeUnder: true });
+  },
+});
+
+reg('layout', 'fillRepeat', {
+  name: '埋め尽くし', tags: ['pop', 'graphic', 'vocalo'], w: 0.75, busy: true, fits: n => n <= 14,
+  plan(rng, cut, st) {
+    const rowsN = rng.pick([9, 10, 11, 12]);
+    return {
+      rowsN, mainRow: rng.int(3, rowsN - 3),
+      font: rng.pick(fontsOf(st, ['display'])), tileFont: rng.pick(fontsOf(st, ['body', 'serif', 'display'])),
+      speed: rng.range(16, 30), plate: rng.pick(['ink', 'accent', 'ink']),
+    };
+  },
+  render(env) {
+    const { W, H, sc } = env, P2 = env.cut.params, lb = env.ltb;
+    const rowsN = P2.rowsN, rowH = H / rowsN;
+    // メイン帯は横長で2段分、縦長で2行に割れるときは3段分の高さを取る
+    const mt = W < H ? J.splitLines(env.cut.text, 6) : env.cut.text;
+    const span = mt.includes('\n') ? 3 : 2;
+    const mainRow = clamp(P2.mainRow, 1, rowsN - 1 - span) | 0;
+    const unit = env.cut.text + '　';
+    const ts = rowH * 0.68;
+    const period = Math.max(1, J.measure({ text: unit, font: P2.tileFont, size: ts, track: 0.02 }).w);
+    const reps = Math.ceil((W * 1.6) / period) + 2;
+    const inA = E.outExpo(clamp(env.lt / 0.4));
+    // sc.dim は背景に近すぎるので、背景と sub の中間色で「埋め尽くし」が見える濃さにする
+    const tileCol = J.mix(sc.bg, sc.sub, 0.42);
+    for (let r = 0; r < rowsN; r++) {
+      if (r >= mainRow && r < mainRow + span) continue;
+      const dir = r % 2 ? 1 : -1;
+      const off = (((r % 2) * period * 0.5 + lb * P2.speed * dir) % period + period) % period;
+      env.draw({ text: unit.repeat(reps), font: P2.tileFont, size: ts, track: 0.02, align: 'left', x: -period + off - period * 0.5, y: (r + 0.5) * rowH, color: tileCol, alpha: 0.9 * inA, ghost: false });
+    }
+    const bandY = mainRow * rowH, bandH = rowH * span;
+    const plateCol = P2.plate === 'accent' ? sc.accent : sc.ink;
+    const e = E.outExpo(clamp((env.lt * 1.4) / Math.max(0.2, env.cut.inDur))) * (1 - E.inCubic(env.pOut));
+    env.rect(0, bandY, W, bandH, plateCol, e);
+    const textCol = J.lum(plateCol) > 0.55 ? '#111111' : '#FFFFFF';
+    const size = Math.min(J.fitSize(mt, P2.font, W * 0.86, bandH * 0.8, { track: 0.03 }), bandH * 0.72);
+    return J.mainDraw(env, { text: mt, font: P2.font, size, x: W / 2, y: bandY + bandH / 2, track: 0.03, color: textCol });
+  },
+});
+
+/* ================= ENTER ================= */
+
+reg('enter', 'rapidFlash', {
+  name: '高速連打', tags: ['pop', 'glitch', 'vocalo'], w: 0.8,
+  inDur: (dur) => clamp(dur * 0.4, 0.22, 0.65),
+  apply(env, it, p) {
+    const seed = it.seed | 0, steps = 12;
+    const q = Math.floor(p * steps);
+    const decay = 1 - E.outCubic(clamp(p));
+    if (decay <= 0.01) return;                    // resolved: no leftover offset, exactly the resting item
+    it.charFns.push((i) => {
+      const vis = J.r(seed, q, i, 1) < clamp(p * 1.3);
+      if (!vis) return { hide: true };
+      const dx = J.rs(seed, q, i, 2) * it.size * 0.55 * decay;
+      const dy = J.rs(seed, q, i, 3) * it.size * 0.4 * decay;
+      const s = 1 + J.rs(seed, q, i, 4) * 0.7 * decay;
+      return J.r(seed, q, i, 5) < 0.3 * decay ? { dx, dy, s, color: env.sc.accent } : { dx, dy, s };
+    });
+  },
+});
+
+reg('enter', 'pixelIn', {
+  name: 'ピクセル解像', tags: ['glitch', 'graphic', 'vocalo'], w: 0.7,
+  apply(env, it, p) {
+    const seed = it.seed | 0, steps = 5;
+    const lvl = Math.min(steps, Math.floor(p * (steps + 1)));
+    if (lvl >= steps) return;                      // resolved: sharp, no change left (resting item)
+    const k = 1 - lvl / steps;                     // 1 = coarsest block, 0 = about to resolve
+    it.blur = (it.blur || 0) + 12 * k * k;
+    it.charFns.push((i) => {
+      if (J.r(seed, lvl, i, 1) < 0.5 * k) return { hide: true };   // coarse pixels flicker missing blocks
+      const cell = it.size * 0.5 * k;
+      const dx = Math.round(J.rs(seed, lvl, i, 2) * 2) * (cell / 2);
+      const dy = Math.round(J.rs(seed, lvl, i, 3) * 2) * (cell / 2);
+      return { dx, dy, s: 1 + 0.15 * k, blur: 6 * k };
+    });
+  },
+});
+
+/* ================= HOLD ================= */
+
+reg('hold', 'beatBlink', {
+  name: '拍で点滅', tags: ['pop', 'glitch', 'vocalo'], w: 0.7,
+  apply(env, it, amt) {
+    const m = env.fx.motion ?? 0.7, b = env.beat;
+    const decay = b ? Math.exp(-b.since * 8) : Math.pow(0.5 + 0.5 * Math.sin(env.lt * TAU * 2), 4);
+    const k = decay * amt * m * 0.85;
+    if (k < 0.025) return;
+    const swap = b ? (b.index % 2 === 0) : (Math.floor(env.lt * 2) % 2 === 0);
+    const sc = env.sc;
+    it.charFns.push(() => (swap ? { color: sc.accent, a: 1 - 0.25 * k } : { a: 1 - 0.4 * k }));
+  },
+});
+
+/* ================= BG ================= */
+
+// 直前の同じ背景の連続カットからの経過時間（見た目のフェードインを1回にまとめる）
+const bgRunV = new WeakMap();
+const bgT = env => {
+  const c = env.cut; if (!c) return env.t;
+  let s = bgRunV.get(c);
+  if (s == null) {
+    s = c.start;
+    const cs = (env.plan && env.plan.cuts) || [], P0 = c.bgP || {};
+    for (let i = (c.index | 0) - 1; i >= 0 && i < cs.length; i--) {
+      const pc = cs[i];
+      if (pc.bg === c.bg && (pc.bgP || {}).seed === P0.seed && Math.abs(pc.end - s) < 0.06) s = pc.start; else break;
+    }
+    bgRunV.set(c, s);
+  }
+  return env.t - s;
+};
+const layC = (sc, k) => J.mix(sc.bg, sc.fg, k);
+// bg / fx の draw() は呼び出し側で save/restore されないので、自前で状態を戻す（looks.js の bgReg/fxReg と同じ方針）
+const bgReg = (k, d) => reg('bg', k, Object.assign({}, d, { draw(env, PP) { const ctx = env.ctx; ctx.save(); try { d.draw(env, PP || {}, ctx); } finally { ctx.restore(); } } }));
+const fxReg = (k, d) => reg('fx', k, Object.assign({}, d, { draw(ctx, ev, kk, I) { ctx.save(); try { d.draw(ctx, ev, kk, I); } finally { ctx.restore(); } } }));
+
+bgReg('beatStrobe', {
+  name: '拍ストロボ', tags: ['pop', 'glitch', 'vocalo'],
+  plan: rng => ({ stripes: rng.chance(0.5), ang: rng.pick([0, 20, -20, 45]), k: rng.range(0.14, 0.22) }),
+  draw(env, P2, ctx) {
+    const { W, H, sc } = env, b = env.beat;
+    const decay = b ? Math.exp(-b.since * 10) : Math.pow(0.5 + 0.5 * Math.sin(env.t * TAU * 2.4), 5);
+    const e = E.outCubic(clamp(bgT(env) / 0.4));
+    const a = decay * (P2.k || 0.18) * e;
+    if (a > 0.01) { ctx.globalAlpha = a; ctx.fillStyle = J.mix(sc.bg, sc.accent, 0.85); ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    if (P2.stripes && a > 0.02) {
+      const per = Math.min(W, H) * 0.16, R = Math.hypot(W, H) / 2 + 10;
+      ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate((P2.ang || 0) * DEG);
+      ctx.globalAlpha = a * 0.5; ctx.fillStyle = layC(sc, 0.16);
+      for (let x = -R; x < R; x += per * 2) ctx.fillRect(x, -R, per, 2 * R);
+      ctx.restore(); ctx.globalAlpha = 1;
+    }
+  },
+});
+
+/* ================= FX (post effect) ================= */
+
+const bell = k => Math.sin(Math.PI * clamp(k));
+const ampOf = ev => clamp(ev.amp ?? 1, 0.3, 1.6);
+
+fxReg('pixelate', {
+  name: 'ドット化', tags: ['glitch', 'pop', 'vocalo'], w: 0.8, dur: 3, amp: 1, mid: true, scratch: true,
+  draw(ctx, ev, k, I) {
+    const { cw, ch, S } = I; if (!S) return;
+    const a = ampOf(ev) * bell(k);
+    if (a < 0.04) return;
+    const cells = Math.max(6, Math.round(18 - 11 * a));    // 内蔵モザイクより粗く・硬いグリッド
+    const tw = cells, th = Math.max(2, Math.round(cells * ch / cw));
+    const T = I.tmp(tw, th), tx = T.getContext('2d');
+    tx.imageSmoothingEnabled = true; tx.drawImage(S, 0, 0, tw, th);
+    ctx.imageSmoothingEnabled = false;
+    if (I.allowFilter) ctx.filter = `contrast(${(1 + 0.5 * a).toFixed(2)}) saturate(${(1 + 0.9 * a).toFixed(2)})`;
+    ctx.globalAlpha = Math.min(1, a);
+    ctx.drawImage(T, 0, 0, tw, th, 0, 0, cw, ch);
+    ctx.filter = 'none'; ctx.globalAlpha = 1; ctx.imageSmoothingEnabled = true;
+  },
+});
+})();
+
+/* ============================================================
+   JIZURA — 写真PV: IndexedDB保存・ビットマップLRUキャッシュ・
+   スケジューリング（行/カット/拍/均等）・背景としての描画
+   ============================================================ */
+(() => {
+'use strict';
+
+const DB_NAME = 'jizura', STORE = 'photos';
+const LONG_SIDE = 3840, THUMB_SIDE = 240, MAX_BMP = 6;
+
+/* ---------------- IndexedDB（ダメならメモリに退避） ---------------- */
+let dbPromise = null, useMem = false;
+const memStore = new Map();
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('no-idb')); return; }
+    let req;
+    try { req = indexedDB.open(DB_NAME, 1); } catch (e) { reject(e); return; }
+    req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('idb-open-failed'));
+  });
+  return dbPromise;
+}
+function markMemFallback() {
+  if (useMem) return;
+  useMem = true;
+  J.photoNotify && J.photoNotify('この環境では写真をこのタブの間だけ保存します（プライベートブラウジング等でIndexedDBが使えません）');
+}
+async function putRecord(rec) {
+  if (useMem) { memStore.set(rec.id, rec); return; }
+  try {
+    const db = await openDB();
+    await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(rec); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  } catch (e) { markMemFallback(); memStore.set(rec.id, rec); }
+}
+async function getRecord(id) {
+  if (useMem) return memStore.get(id) || null;
+  try {
+    const db = await openDB();
+    return await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readonly'); const rq = tx.objectStore(STORE).get(id); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error); });
+  } catch (e) { return memStore.get(id) || null; }
+}
+async function deleteRecord(id) {
+  if (useMem) { memStore.delete(id); return; }
+  try {
+    const db = await openDB();
+    await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).delete(id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  } catch (e) { memStore.delete(id); }
+}
+
+/* ---------------- 取り込み：縮小 → JPEG化 → 保存 ---------------- */
+async function toJpeg(bmp, w, h, q) {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const cv = new OffscreenCanvas(w, h), cx = cv.getContext('2d');
+    cx.drawImage(bmp, 0, 0, w, h);
+    return cv.convertToBlob({ type: 'image/jpeg', quality: q });
+  }
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const cx = cv.getContext('2d'); cx.drawImage(bmp, 0, 0, w, h);
+  return new Promise(res => cv.toBlob(res, 'image/jpeg', q));
+}
+function fitSize(w, h, long) { const s = Math.min(1, long / Math.max(w, h)); return [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))]; }
+async function processOne(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { throw new Error('decode-failed'); }
+  try {
+    const [ow, oh] = fitSize(bmp.width, bmp.height, LONG_SIDE);
+    const [tw, th] = fitSize(bmp.width, bmp.height, THUMB_SIDE);
+    const blob = await toJpeg(bmp, ow, oh, 0.88);
+    const thumb = await toJpeg(bmp, tw, th, 0.82);
+    const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    await putRecord({ id, blob, thumb, w: ow, h: oh });
+    return id;
+  } finally { try { bmp.close(); } catch (e) {} }
+}
+
+/* ---------------- ビットマップLRUキャッシュ（最大6枚まで常駐） ---------------- */
+const bmpCache = new Map(), bmpOrder = [], pending = new Map();
+function touchLRU(id) {
+  const i = bmpOrder.indexOf(id); if (i >= 0) bmpOrder.splice(i, 1);
+  bmpOrder.push(id);
+  while (bmpOrder.length > MAX_BMP) {
+    const old = bmpOrder.shift(), b = bmpCache.get(old);
+    if (b) { try { b.close(); } catch (e) {} bmpCache.delete(old); }
+  }
+}
+function decodeBitmap(id) {
+  if (!id) return Promise.resolve(null);
+  if (bmpCache.has(id)) { touchLRU(id); return Promise.resolve(bmpCache.get(id)); }
+  if (pending.has(id)) return pending.get(id);
+  const p = (async () => {
+    try {
+      const rec = await getRecord(id);
+      if (!rec || !rec.blob) return null;
+      const bmp = await createImageBitmap(rec.blob);
+      bmpCache.set(id, bmp); touchLRU(id);
+      J.photoOnLoad && J.photoOnLoad(id);   // 一時停止中のプレビューも読み込み完了で描き直す
+      return bmp;
+    } catch (e) { return null; }
+    finally { pending.delete(id); }
+  })();
+  pending.set(id, p);
+  return p;
+}
+function evictBitmap(id) {
+  const b = bmpCache.get(id); if (b) { try { b.close(); } catch (e) {} bmpCache.delete(id); }
+  const i = bmpOrder.indexOf(id); if (i >= 0) bmpOrder.splice(i, 1);
+}
+
+/* ---------------- サムネイルのobject URLキャッシュ（UI用） ---------------- */
+const thumbURLs = new Map();
+async function thumbURL(id) {
+  if (thumbURLs.has(id)) return thumbURLs.get(id);
+  const rec = await getRecord(id);
+  if (!rec || !rec.thumb) return null;
+  const url = URL.createObjectURL(rec.thumb);
+  thumbURLs.set(id, url);
+  return url;
+}
+function revokeThumb(id) { const u = thumbURLs.get(id); if (u) { URL.revokeObjectURL(u); thumbURLs.delete(id); } }
+
+/* ---------------- スケジューリング（純粋関数・plan単位でキャッシュ） ---------------- */
+// 拍の並び：plan.beats があればそれを使い、無ければ設定のBPM、それも無ければ120BPM相当（0.5秒間隔）にする
+function beatBoundaries(plan) {
+  if (plan.beats && plan.beats.length) return plan.beats;
+  const bpm = (plan.photo && plan.photo.bpm) || 0;
+  const step = bpm > 0 ? 60 / bpm : 0.5;
+  const out = []; for (let t = 0; t < plan.duration; t += step) out.push(t);
+  return out;
+}
+// plan と project.photo から、時間軸上の写真の切り替わり区間 [{start, end, idx}] を組み立てる
+function computeSegments(plan) {
+  const ph = plan.photo || {};
+  const ids = ph.ids || [];
+  const n = ids.length;
+  const dur = Math.max(0.001, plan.duration || 0);
+  if (!n) return [];
+  const unit = ph.unit || 'line';
+  let segs = [];
+  if (unit === 'even') {
+    for (let i = 0; i < n; i++) segs.push({ start: dur * i / n, end: dur * (i + 1) / n, idx: i });
+  } else if (unit === 'cut') {
+    const cuts = (plan.cuts || []).slice().sort((a, b) => a.start - b.start);
+    segs = cuts.map((c, i) => ({ start: c.start, end: c.end, idx: i % n }));
+  } else if (unit === 'beat') {
+    const beatsPer = Math.max(1, ph.beatsPer || 4);
+    const beats = beatBoundaries(plan);
+    const bounds = [0];
+    for (let i = beatsPer; i < beats.length; i += beatsPer) bounds.push(beats[i]);
+    if (bounds[bounds.length - 1] < dur - 1e-6) bounds.push(dur);
+    for (let i = 0; i < bounds.length - 1; i++) if (bounds[i + 1] > bounds[i] + 1e-6) segs.push({ start: bounds[i], end: bounds[i + 1], idx: segs.length % n });
+  } else { // 'line'（既定）：行の開始で区切る。頭の間や行間の余白は前後の区間に含める
+    const lines = (plan.lines || []).slice().sort((a, b) => a.start - b.start);
+    if (!lines.length) segs = [{ start: 0, end: dur, idx: 0 }];
+    else segs = lines.map((ln, i) => ({ start: i === 0 ? 0 : ln.start, end: i === lines.length - 1 ? dur : lines[i + 1].start, idx: i % n }));
+  }
+  if (!segs.length) segs = [{ start: 0, end: dur, idx: 0 }];
+  return segs;
+}
+const segCache = new WeakMap();
+function getSegments(plan) {
+  let s = segCache.get(plan);
+  if (!s) { s = computeSegments(plan); segCache.set(plan, s); }
+  return s;
+}
+function segAt(segs, t) {
+  let lo = 0, hi = segs.length - 1, ans = 0;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (segs[m].start <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+
+/* ---------------- Ken Burns（決定論的なゆっくりズーム＋パン） ---------------- */
+function kbParams(segIdx, segT, segDur, on) {
+  if (!on) return { zoom: 1, panX: 0, panY: 0 };
+  const p = segDur > 0 ? J.clamp(segT / segDur) : 0;
+  const zoom = J.lerp(1.0, 1.08, p);
+  const ang = J.r(segIdx, 5011) * J.TAU; // 区間indexのハッシュから向きを決める
+  return { zoom, panX: Math.cos(ang) * p, panY: Math.sin(ang) * p };
+}
+function drawCover(ctx, bmp, W, H, alpha, zoom, panX, panY) {
+  if (!bmp || alpha <= 0) return;
+  const bw = bmp.width, bh = bmp.height;
+  const scale = Math.max(W / bw, H / bh) * zoom;
+  const dw = bw * scale, dh = bh * scale;
+  const maxOffX = Math.max(0, (dw - W) / 2), maxOffY = Math.max(0, (dh - H) / 2);
+  const dx = W / 2 - dw / 2 + panX * maxOffX, dy = H / 2 - dh / 2 + panY * maxOffY;
+  ctx.globalAlpha = alpha; ctx.drawImage(bmp, dx, dy, dw, dh); ctx.globalAlpha = 1;
+}
+
+/* ---------------- 公開API ---------------- */
+J.photo = {
+  // 複数ファイルを順番に処理してIndexedDBへ保存し、追加できたidの配列を返す（進捗はonProgress(p,msg)）
+  addFiles: async (files, onProgress) => {
+    const list = Array.from(files || []).filter(f => f && (/^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name || '')));
+    const added = []; let skipped = 0;
+    for (let i = 0; i < list.length; i++) {
+      onProgress && onProgress(i / Math.max(1, list.length), `写真を処理中 ${i + 1}/${list.length}`);
+      try { added.push(await processOne(list[i])); } catch (e) { skipped++; }
+      await new Promise(r => setTimeout(r, 0)); // 1枚ずつ処理してUIをブロックしない
+    }
+    onProgress && onProgress(1, '完了');
+    if (skipped) J.photoNotify && J.photoNotify(`読み込めなかった写真: ${skipped}枚（HEIC等、非対応の形式の可能性があります）`);
+    return added;
+  },
+  remove: async (id) => { await deleteRecord(id); evictBitmap(id); revokeThumb(id); },
+  removeAll: async (ids) => { for (const id of ids || []) await J.photo.remove(id); },
+  thumbURL,
+  // 保存済みプロジェクトのidのうち、IndexedDBに実体が無いものを取り除く
+  filterExisting: async (ids) => {
+    const out = []; let missing = 0;
+    for (const id of ids || []) { if (await getRecord(id)) out.push(id); else missing++; }
+    return { ids: out, missing };
+  },
+  // 時刻tの前後で必要なビットマップの読み込みを（待たずに）開始する
+  prefetch: (plan, t) => {
+    const ph = plan.photo; if (!ph || !ph.on || !ph.ids || !ph.ids.length) return;
+    const segs = getSegments(plan); if (!segs.length) return;
+    const i = segAt(segs, t), ids = ph.ids;
+    decodeBitmap(ids[segs[i].idx]);
+    if (segs[i + 1]) decodeBitmap(ids[segs[i + 1].idx]);
+  },
+  // 書き出し用：時刻tの描画に要るビットマップの準備ができるまで待つ
+  ready: async (plan, t) => {
+    const ph = plan.photo; if (!ph || !ph.on || !ph.ids || !ph.ids.length) return;
+    const segs = getSegments(plan); if (!segs.length) return;
+    const i = segAt(segs, t), ids = ph.ids, cur = segs[i];
+    const fade = Math.max(0, ph.fade != null ? ph.fade : 0.35);
+    const tasks = [decodeBitmap(ids[cur.idx])];
+    if (i > 0 && t - cur.start < fade) tasks.push(decodeBitmap(ids[segs[i - 1].idx]));
+    if (segs[i + 1] && cur.end - t < fade) tasks.push(decodeBitmap(ids[segs[i + 1].idx]));
+    await Promise.all(tasks);
+  },
+  // レンダラーから呼ぶ：現在の写真（＋切替中はクロスフェード）とKen Burns、暗さのオーバーレイを描く
+  draw: (ctx, plan, t, W, H, sc) => {
+    const ph = plan.photo; if (!ph || !ph.on) return false;
+    const ids = ph.ids || []; if (!ids.length) return false;
+    const segs = getSegments(plan); if (!segs.length) return false;
+    J.photo.prefetch(plan, t);
+    const i = segAt(segs, t), cur = segs[i];
+    const kbOn = ph.kenBurns !== false;
+    const fade = Math.max(0, ph.fade != null ? ph.fade : 0.35);
+    const curDur = Math.max(0.001, cur.end - cur.start), curT = J.clamp(t - cur.start, 0, curDur);
+    let curBmp = bmpCache.get(ids[cur.idx]) || null;
+    if (curBmp) touchLRU(ids[cur.idx]);
+    if (i > 0 && fade > 0 && curT < fade) {
+      const prev = segs[i - 1], prevDur = Math.max(0.001, prev.end - prev.start);
+      const prevBmp = bmpCache.get(ids[prev.idx]) || null;
+      if (prevBmp) touchLRU(ids[prev.idx]);
+      if (prevBmp) { const kb = kbParams(prev.idx, prevDur, prevDur, kbOn); drawCover(ctx, prevBmp, W, H, 1, kb.zoom, kb.panX, kb.panY); }
+      if (curBmp) { const kb = kbParams(cur.idx, curT, curDur, kbOn); drawCover(ctx, curBmp, W, H, J.clamp(curT / fade), kb.zoom, kb.panX, kb.panY); }
+    } else if (curBmp) {
+      const kb = kbParams(cur.idx, curT, curDur, kbOn); drawCover(ctx, curBmp, W, H, 1, kb.zoom, kb.panX, kb.panY);
+    } else if (i > 0) {
+      // まだ現在の写真が読み込めていない場合は、直前の写真をそのまま出す（何も描かないよりまし・描画は止めない）
+      const prev = segs[i - 1], prevBmp = bmpCache.get(ids[prev.idx]);
+      if (prevBmp) { const prevDur = Math.max(0.001, prev.end - prev.start); const kb = kbParams(prev.idx, prevDur, prevDur, kbOn); drawCover(ctx, prevBmp, W, H, 1, kb.zoom, kb.panX, kb.panY); }
+    }
+    const dim = J.clamp(ph.dim != null ? ph.dim : 0.35, 0, 0.9);
+    if (dim > 0 && sc && sc.bg) { ctx.globalAlpha = dim; ctx.fillStyle = sc.bg; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+    return true;
+  },
+  // テスト・デバッグ用：キャッシュを介さない純粋な区間計算
+  _computeSegments: computeSegments,
+};
+// UIからトースト表示を差し込むためのフック（12_ui.js側で J.photoNotify = toast; のように設定する）
+J.photoNotify = null;
+// ビットマップの読み込み完了を知らせるフック（12_ui.js側で再描画要求をつなぐ）
+J.photoOnLoad = null;
+})();
+
 /* ============================================================
    JIZURA — editor UI
    ============================================================ */
@@ -12689,7 +13277,14 @@ function mergeProject(p) {
   o.fonts = (p && p.fonts) || {};
   o.userFonts = (p && p.userFonts) || [];
   for (const uf of o.userFonts) if (!J.FONTS[uf.key]) J.addUserFont(uf.key, uf.label, uf.family, uf.weight || 400);
+  o.photo = Object.assign(J.defaultProject().photo, (p && p.photo) || {});
   return o;
+}
+// 保存されたプロジェクトが参照している写真idのうち、IndexedDBに実体が無いものを取り除く
+async function reconcilePhotos() {
+  const ids = S.project.photo.ids; if (!ids || !ids.length) return;
+  const { ids: kept, missing } = await J.photo.filterExisting(ids);
+  if (missing) { S.project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
 }
 function loadLocal() { try { const s = localStorage.getItem(LS_KEY); if (s) return mergeProject(JSON.parse(s)); } catch (e) {} return mergeProject(null); }
 let saveTimer = 0;
@@ -13042,7 +13637,7 @@ function restartPreview() { seek(0); if (!S.playing && S.mode === 'easy') play()
 function omakase() {
   if (S.exporting || S.tap) return;
   remember();
-  const r = J.omakase(S.project);
+  const r = J.omakase(S.project, Math.random, S.project.moodLock ? { mood: S.project.moodLock } : undefined);
   Object.assign(S.project, r);
   fontKey = ''; syncUI(); replan(); commit();
   toast(`おまかせ：${J.STYLES[r.style].name} × ${J.MOODS[r.mood].name}`, r.colors.accentOn ? [r.colors.accent, r.colors.ghostA, r.colors.ghostB] : null);
@@ -13060,7 +13655,7 @@ function rerollPart(part) {
     P.colors.enabled = false;
     msg = `スタイル：${J.STYLES[P.style].name}`;
   } else if (part === 'mood') {
-    const r = J.omakase(P);
+    const r = J.omakase(P, Math.random, P.moodLock ? { mood: P.moodLock } : undefined);
     Object.assign(P, { mood: r.mood, fx: r.fx, enabled: r.enabled });
     msg = `雰囲気：${J.MOODS[r.mood].name}`;
   } else if (part === 'cut') {
@@ -13094,6 +13689,64 @@ function toast(m, cols) {
   el.hidden = false; el.classList.remove('out'); void el.offsetWidth; el.classList.add('in');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.classList.remove('in'); el.classList.add('out'); toastTimer = setTimeout(() => { el.hidden = true; }, 260); }, 1700);
+}
+
+/* ---------------- 写真PV ---------------- */
+function phSyncUI() {
+  const p = S.project.photo;
+  $('phOn').checked = !!p.on; $('phOnPro').checked = !!p.on;
+  $('phUnit').value = p.unit; $('phUnitPro').value = p.unit;
+  $('phBeatsPer').value = String(p.beatsPer);
+  $('phDim').value = p.dim; $('phDimOut').textContent = Math.round(p.dim * 100) + '%';
+  $('phDimPro').value = p.dim; $('phDimProOut').textContent = Math.round(p.dim * 100) + '%';
+  $('phFade').value = p.fade; $('phFadeOut').textContent = (+p.fade).toFixed(2) + 's';
+  $('phKenBurns').checked = p.kenBurns !== false;
+  const n = p.ids.length;
+  $('phCount').textContent = n + '枚'; $('phCountPro').textContent = n + '枚';
+  renderPhotoGrid();
+}
+function renderPhotoGrid() {
+  const grid = $('phGrid'); if (!grid) return;
+  grid.innerHTML = '';
+  const ids = S.project.photo.ids;
+  ids.forEach((id, i) => {
+    const div = document.createElement('div'); div.className = 'ph-item';
+    div.innerHTML = '<img alt="">'
+      + '<button class="icon ghost ph-x" title="削除">×</button>'
+      + '<span class="ph-mv l"><button class="ghost small" title="前へ">▲</button></span>'
+      + '<span class="ph-mv r"><button class="ghost small" title="次へ">▼</button></span>';
+    grid.appendChild(div);
+    J.photo.thumbURL(id).then(url => { if (url) div.querySelector('img').src = url; });
+    div.querySelector('.ph-x').addEventListener('click', async () => {
+      await J.photo.remove(id);
+      S.project.photo.ids = S.project.photo.ids.filter(x => x !== id);
+      phSyncUI(); photoChanged();
+    });
+    div.querySelector('.ph-mv.l button').addEventListener('click', () => movePhoto(i, -1));
+    div.querySelector('.ph-mv.r button').addEventListener('click', () => movePhoto(i, 1));
+  });
+}
+function movePhoto(i, d) {
+  const ids = S.project.photo.ids, j = i + d; if (j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]]; renderPhotoGrid(); photoChanged();
+}
+function photoChanged() { autosave(); replan(); } // 並び順・単位など、構成に影響する設定の変更後に呼ぶ
+async function addPhotoFiles(files) {
+  if (!files || !files.length) return;
+  const boxes = [$('phProgress'), $('phProgressPro')].filter(Boolean);
+  boxes.forEach(b => { b.hidden = false; });
+  try {
+    const ids = await J.photo.addFiles(files, (p, m) => {
+      const pct = (p * 100).toFixed(0) + '%';
+      const bar = $('phBar'), barPro = $('phBarPro'), txt = $('phProgText'), txtPro = $('phProgTextPro');
+      if (bar) bar.style.width = pct; if (barPro) barPro.style.width = pct;
+      if (txt) txt.textContent = m; if (txtPro) txtPro.textContent = m;
+    });
+    S.project.photo.ids = S.project.photo.ids.concat(ids);
+    if (ids.length) S.project.photo.on = true;
+    phSyncUI(); photoChanged();
+    if (ids.length) toast(`写真 ${ids.length}枚を追加`);
+  } finally { boxes.forEach(b => { b.hidden = true; }); }
 }
 
 /* ---------------- かんたん / 詳細 ---------------- */
@@ -13245,7 +13898,8 @@ function syncUI() {
   $('offset').value = S.project.timing.offset ?? 0.4;
   $('lineScale').value = S.project.timing.lineScale ?? 1;
   $('snap').checked = !!S.project.timing.snap;
-  renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid();
+  $('moodLock').value = S.project.moodLock || '';
+  renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid(); phSyncUI();
 }
 
 /* ---------------- wiring ---------------- */
@@ -13258,6 +13912,9 @@ function bind() {
   $('offset').addEventListener('change', e => { S.project.timing.offset = Math.max(0, parseFloat(e.target.value) || 0); replan(); });
   $('lineScale').addEventListener('change', e => { S.project.timing.lineScale = J.clamp(parseFloat(e.target.value) || 1, 0.3, 4); replan(); });
   $('snap').addEventListener('change', e => { S.project.timing.snap = e.target.checked; replan(); });
+  // 雰囲気ロック：固定すると、以後の「おまかせ」は常にこの雰囲気を使う
+  $('moodLock').innerHTML = '<option value="">おまかせ（毎回変える）</option>' + Object.keys(J.MOODS).map(k => `<option value="${k}">${escapeHtml(J.MOODS[k].name)}</option>`).join('');
+  $('moodLock').addEventListener('change', e => { S.project.moodLock = e.target.value || null; autosave(); });
   $('btnResetTimes').addEventListener('click', () => { S.project.timing.lineTimes = {}; replan(); });
   $('audioFile').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
@@ -13340,12 +13997,57 @@ function bind() {
   $('eCut').addEventListener('click', () => rerollPart('cut'));
   $('ePalette').addEventListener('click', () => { randomPalette(); restartPreview(); });
   $('btnSave').addEventListener('click', () => J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)));
-  $('btnAE').addEventListener('click', () => J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1)));
+  $('btnAE').addEventListener('click', () => {
+    if (S.plan.photo && S.plan.photo.on) toast('写真PVモードの写真はAE用データには含まれません');
+    J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1));
+  });
   $('fileProject').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    try { S.project = mergeProject(JSON.parse(await f.text())); syncUI(); replan(); }
+    try { S.project = mergeProject(JSON.parse(await f.text())); syncUI(); replan(); reconcilePhotos(); }
     catch (err) { showMsg('プロジェクトを読み込めませんでした'); setTimeout(() => showMsg(null), 2500); }
     e.target.value = '';
+  });
+  // 写真PV
+  J.photoNotify = toast;
+  J.photoOnLoad = () => { S.need = true; };
+  $('phOn').addEventListener('change', e => { S.project.photo.on = e.target.checked; $('phOnPro').checked = e.target.checked; photoChanged(); });
+  $('phOnPro').addEventListener('change', e => { S.project.photo.on = e.target.checked; $('phOn').checked = e.target.checked; photoChanged(); });
+  $('phAdd').addEventListener('change', e => { addPhotoFiles(e.target.files); e.target.value = ''; });
+  $('phAddPro').addEventListener('change', e => { addPhotoFiles(e.target.files); e.target.value = ''; });
+  $('phUnit').addEventListener('change', e => { S.project.photo.unit = e.target.value; $('phUnitPro').value = e.target.value; photoChanged(); });
+  $('phUnitPro').addEventListener('change', e => { S.project.photo.unit = e.target.value; $('phUnit').value = e.target.value; photoChanged(); });
+  $('phBeatsPer').addEventListener('change', e => { S.project.photo.beatsPer = +e.target.value; photoChanged(); });
+  $('phDim').addEventListener('input', e => {
+    S.project.photo.dim = +e.target.value; $('phDimOut').textContent = Math.round(e.target.value * 100) + '%';
+    $('phDimPro').value = e.target.value; $('phDimProOut').textContent = Math.round(e.target.value * 100) + '%';
+    replanSoon(120);
+  });
+  $('phDimPro').addEventListener('input', e => {
+    S.project.photo.dim = +e.target.value; $('phDimProOut').textContent = Math.round(e.target.value * 100) + '%';
+    $('phDim').value = e.target.value; $('phDimOut').textContent = Math.round(e.target.value * 100) + '%';
+    replanSoon(120);
+  });
+  $('phFade').addEventListener('input', e => { S.project.photo.fade = +e.target.value; $('phFadeOut').textContent = (+e.target.value).toFixed(2) + 's'; replanSoon(120); });
+  $('phKenBurns').addEventListener('change', e => { S.project.photo.kenBurns = e.target.checked; replan(); });
+  $('phShuffle').addEventListener('click', () => {
+    const ids = S.project.photo.ids;
+    for (let i = ids.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    renderPhotoGrid(); photoChanged();
+  });
+  $('phClearAll').addEventListener('click', async () => {
+    if (!S.project.photo.ids.length) return;
+    if (!confirm('写真をすべて削除しますか？')) return;
+    await J.photo.removeAll(S.project.photo.ids);
+    S.project.photo.ids = [];
+    phSyncUI(); photoChanged();
+  });
+  ['dragover', 'drop'].forEach(evt => $('app').addEventListener(evt, e => {
+    if (e.dataTransfer && [...(e.dataTransfer.items || [])].some(it => it.kind === 'file')) e.preventDefault();
+  }));
+  $('app').addEventListener('drop', e => {
+    const files = e.dataTransfer && e.dataTransfer.files; if (!files || !files.length) return;
+    const imgs = [...files].filter(f => /^image\//.test(f.type));
+    if (imgs.length) addPhotoFiles(imgs);
   });
   document.addEventListener('keydown', e => {
     const tag = (e.target && e.target.tagName) || '';
@@ -13365,7 +14067,7 @@ function bind() {
 /* ---------------- boot ---------------- */
 function boot() {
   S.project = loadLocal();
-  bind(); syncUI(); replan();
+  bind(); syncUI(); replan(); reconcilePhotos();
   let mode = 'easy'; try { mode = localStorage.getItem('jizura.mode') || 'easy'; } catch (e) {}
   setMode(mode); commit();
   // open on a representative frame (end of the first cut's entrance)

@@ -86,6 +86,10 @@ class Renderer {
         ctx.drawImage(this.paper(W, H), 0, 0, W, H);
         ctx.filter = 'none'; ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
       }
+      // 写真PVモード：写真を背景として敷き、暗さのオーバーレイをかける（透過PNGには出さない）
+      if (plan.photo && plan.photo.on && plan.photo.ids && plan.photo.ids.length) {
+        try { J.photo.draw(ctx, plan, t, W, H, sc); } catch (e) { console.warn('photo', e); }
+      }
     }
     // ---------- camera & chroma amounts ----------
     const u = H / 1080;

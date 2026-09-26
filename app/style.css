@@ -122,7 +122,7 @@ button.play { width: 40px; height: 34px; padding: 0; font-size: 14px; }
 .hint { font-size: 12px; color: var(--muted); }
 
 /* ---------- right panel ---------- */
-.tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
+.tabs { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
 .tabs button { border: 0; border-radius: 0; background: transparent; padding: 11px 4px; color: var(--muted); border-bottom: 2px solid transparent; }
 .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--amber); }
 .tabpane { padding: 14px 16px 24px; }
@@ -213,6 +213,16 @@ button.omakase:disabled { box-shadow: none; }
 }
 .toast.in { opacity: 1; transform: translate(-50%, 0); }
 .toast.out { opacity: 0; transform: translate(-50%, -6px); }
+
+/* ---------- 写真PV ---------- */
+.ph-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.ph-item { position: relative; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--raised); }
+.ph-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--raised2); }
+.ph-item .ph-x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; line-height: 18px; font-size: 12px; border-radius: 50%; }
+.ph-item .ph-mv { position: absolute; bottom: 2px; display: flex; gap: 2px; }
+.ph-item .ph-mv.l { left: 2px; }
+.ph-item .ph-mv.r { right: 2px; }
+.ph-item .ph-mv button { padding: 1px 5px; font-size: 10px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {

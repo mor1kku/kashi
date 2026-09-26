@@ -22,6 +22,8 @@ J.MOODS = {
     layout: ['huge', 'center', 'vcols', 'stack', 'condensed', 'mixed', 'circle'], enter: ['assemble', 'blur', 'zoom', 'wipe', 'slice'], exit: ['drift', 'explode', 'fall', 'blur'], styles: ['noir', 'paper', 'hud', 'mono', 'crimson'] },
   chaos:     { name: '全部入り', fx: { motion: [0.5, 1], glitch: [0.3, 1], chroma: [0.4, 1], decor: [0.4, 1], density: [0.45, 0.9], texture: [0.3, 1], bgSwitch: [0.3, 0.9] },
     layout: null, enter: null, exit: null, styles: null },
+  vocalo:    { name: 'ボカロ', fx: { motion: [0.75, 1], glitch: [0.45, 0.75], chroma: [0.5, 0.8], decor: [0.4, 0.7], density: [0.65, 0.95], texture: [0.3, 0.7], bgSwitch: [0.5, 0.85] },
+    layout: ['danmaku', 'fillRepeat', 'huge', 'scatter', 'marquee', 'center', 'tile', 'labels'], enter: ['rapidFlash', 'pixelIn', 'scramble', 'slice', 'pop'], exit: ['glitch', 'slice', 'explode', 'scatter'], styles: ['neon', 'primary', 'digital', 'crimson', 'magenta'] },
 };
 
 /* mood tags for the core (pre-pack) items */
@@ -37,18 +39,20 @@ J.MOODS = {
   for (const [g, map] of Object.entries(extra)) for (const [k, ms] of Object.entries(map)) ms.forEach(m => add(g, k, m));
 })();
 
-J.omakase = (project, rnd = Math.random) => {
+J.omakase = (project, rnd = Math.random, opts = {}) => {
   const pick = a => a[Math.floor(rnd() * a.length) % a.length];
   const range = r => +(r[0] + (r[1] - r[0]) * rnd()).toFixed(2);
+  // opts.mood: force a specific mood every time (雰囲気ロック), instead of excluding the current one and picking at random
+  const forced = opts.mood && J.MOODS[opts.mood] ? opts.mood : null;
   const moods = Object.keys(J.MOODS).filter(k => k !== project.mood);
-  const mood = pick(moods), M = J.MOODS[mood];
+  const mood = forced || pick(moods), M = J.MOODS[mood];
   // style: mostly one that suits the mood, sometimes anything; never the same twice in a row
   let pool = (M.styles && rnd() < 0.72 ? M.styles : J.STYLE_ORDER).filter(k => k !== project.style);
   if (!pool.length) pool = J.STYLE_ORDER.filter(k => k !== project.style);
   const style = pick(pool);
   const fx = Object.assign({}, project.fx);
   for (const k of Object.keys(M.fx)) fx[k] = range(M.fx[k]);
-  fx.koma = pick({ glitch: [12, 12, 8], pop: [12, 12, 8, 0], calm: [0, 0, 12], editorial: [0, 12], emotional: [12, 0], graphic: [12, 12, 0] }[mood] || [12, 8, 0]);
+  fx.koma = pick({ glitch: [12, 12, 8], pop: [12, 12, 8, 0], calm: [0, 0, 12], editorial: [0, 12], emotional: [12, 0], graphic: [12, 12, 0], vocalo: [12, 0, 0] }[mood] || [12, 8, 0]);
   fx.onTwos = fx.koma > 0; fx.flash = rnd() < 0.65; fx.hud = pick(['auto', 'auto', 'on', 'off']);
   // technique subset per group: everything tagged with the mood (plus the mood's hand-picked core items),
   // a sprinkle of everything else, and a minimum count so the planner always has room to vary

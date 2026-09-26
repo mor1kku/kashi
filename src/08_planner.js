@@ -13,7 +13,7 @@ J.defaultProject = () => ({
   version: 1,
   title: '', artist: '',
   lyrics: J.SAMPLE_LYRICS,
-  style: 'noir', mood: null,
+  style: 'noir', mood: null, moodLock: null,
   seed: 20260922,
   aspect: '16:9', res: 1080, fps: 24,
   fx: { motion: 0.7, glitch: 0.55, chroma: 0.7, decor: 0.5, density: 0.55, texture: 0.6, flash: true, onTwos: true, koma: 12, hud: 'auto', bgSwitch: 0.35 },
@@ -22,6 +22,7 @@ J.defaultProject = () => ({
   overrides: {},
   colors: { enabled: false },
   fonts: {},
+  photo: { on: false, ids: [], unit: 'line', beatsPer: 4, dim: 0.35, kenBurns: true, fade: 0.35 },
 });
 
 /* the original (After Effects-implemented) sets, captured before any expression pack registers */
@@ -300,6 +301,9 @@ J.plan = (project, audio) => {
   plan.events.sort((a, b) => a.t - b.t);
   plan.energy = audio && audio.energy ? audio.energy : null;
   plan.energyRate = audio && audio.energyRate ? audio.energyRate : 0;
+  // 写真PVモード：写真を背景に出す間は行ごとの背景グラフィックを消して写真を隠さないようにする
+  plan.photo = Object.assign({}, J.defaultProject().photo, project.photo || {}, { bpm: (project.timing && project.timing.bpm) || 0 });
+  if (plan.photo.on) plan.cuts.forEach(c => { c.bg = 'none'; });
   return plan;
 };
 
