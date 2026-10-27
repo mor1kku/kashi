@@ -18,7 +18,7 @@ J.defaultProject = () => ({
   aspect: '16:9', res: 1080, fps: 24,
   fx: { motion: 0.7, glitch: 0.55, chroma: 0.7, decor: 0.5, density: 0.55, texture: 0.6, flash: true, onTwos: true, koma: 12, hud: 'auto', bgSwitch: 0.35 },
   enabled: Object.fromEntries(J.GROUP_KEYS.map(g => [g, Object.fromEntries(J.order(g).map(k => [k, true]))])),
-  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, autoTimes: {}, ignoreLrc: false, lineScale: 1 },
+  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, lineEnds: {}, autoTimes: {}, ignoreLrc: false, lineScale: 1 },
   overrides: {},
   colors: { enabled: false },
   fonts: {},
@@ -152,6 +152,9 @@ J.computeTiming = (project, parsed, audio) => {
   });
   const hasExplicitEnd = starts.length > 0 && T.autoEnd != null && Number.isFinite(+T.autoEnd) && +T.autoEnd > starts[starts.length - 1];
   const ends = starts.map((s, i) => {
+    const explicit = T.lineEnds?.[i];
+    const limit = i < starts.length - 1 ? starts[i + 1] : (audio?.duration ?? Infinity);
+    if (explicit != null && Number.isFinite(+explicit) && +explicit > s && +explicit <= limit) return +explicit;
     // Closely spaced phrases must not keep the previous lyric over the next one.
     if (i < starts.length - 1) return starts[i + 1] > s ? starts[i + 1] : s + 0.35;
     if (hasExplicitEnd) return +T.autoEnd;
@@ -162,7 +165,8 @@ J.computeTiming = (project, parsed, audio) => {
     return s + d;
   });
   let duration = (ends.length ? ends[ends.length - 1] : 3) + (T.tail ?? 0.9);
-  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + (hasAutoTimes || hasExplicitEnd ? 0 : 0.2) : 1);
+  const hasLastEnd = T.lineEnds?.[starts.length - 1] != null && +T.lineEnds[starts.length - 1] === ends[ends.length - 1];
+  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + (hasAutoTimes || hasExplicitEnd || hasLastEnd ? 0 : 0.2) : 1);
   return { starts, ends, duration };
 };
 
@@ -213,7 +217,8 @@ J.plan = (project, audio) => {
     const lineSeed = ov.lock && ov.lockedSeed != null ? ov.lockedSeed : J.h(project.seed, li + 1, ov.seed | 0);
     const rng = J.rng(lineSeed);
     const n = [...ln.text.replace(/\s+/g, '')].length;
-    const visEnd = Math.min(e, s + Math.max(3.6, n * 0.5 + 1.2));
+    const explicitEnd = project.timing?.lineEnds?.[li];
+    const visEnd = explicitEnd != null && +explicitEnd === e ? e : Math.min(e, s + Math.max(3.6, n * 0.5 + 1.2));
     const D = visEnd - s;
     plan.lines.push({ index: li, text: ln.text, start: s, end: e, visEnd, note: ln.note, impact: ln.impact, emph: ln.emph, chunks: null, seed: lineSeed });
     const chunks = ln.manual || J.chunkText(ln.text);

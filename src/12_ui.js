@@ -390,6 +390,12 @@ function renderLines() {
         <button class="ghost small anchor-now" title="この行を現在位置に固定し、前後の未固定行を再配置">今に合わせて前後を再配置</button>
         <button class="ghost small release-time" title="この行の固定を解除して再配置">固定解除</button>
       </div>
+      <div class="duration-tools">
+        <label>終了(秒)<input class="line-end mono" type="number" min="0" step="0.01" value="${ln.end.toFixed(2)}" aria-label="${i + 1}行目の終了秒"></label>
+        <label>表示時間(秒)<input class="line-duration mono" type="number" min="0.01" step="0.1" value="${(ln.end - ln.start).toFixed(2)}" aria-label="${i + 1}行目の表示時間"></label>
+        <label>表示速度<select class="line-speed" aria-label="${i + 1}行目の表示速度"><option value="0.8">0.8倍・長く</option><option value="1" selected>1倍</option><option value="1.25">1.25倍・短く</option><option value="2">2倍・半分</option></select></label>
+        <button class="ghost small apply-line-speed">速度を反映</button>
+      </div>
       <div class="meta"><span class="cuts"></span>
       <span class="tools">
         <select aria-label="レイアウト指定">${layoutOpts}</select>
@@ -407,6 +413,9 @@ function renderLines() {
     li.querySelector('.anchor-now').addEventListener('click', () => anchorLineNow(i));
     li.querySelector('.release-time').addEventListener('click', () => releaseLineTime(i));
     li.querySelector('.release-time').disabled = !manual && !lrcFixed;
+    li.querySelector('.line-end').addEventListener('change', e => setLineEnd(i, Number(e.target.value)));
+    li.querySelector('.line-duration').addEventListener('change', e => setLineDuration(i, Number(e.target.value)));
+    li.querySelector('.apply-line-speed').addEventListener('click', () => applyLineSpeed(i, Number(li.querySelector('.line-speed').value)));
     li.querySelector('.txt').addEventListener('click', () => { $('timingFrom').value = String(i); $('timingTo').value = String(S.plan.lines.length - 1); seek(ln.start); });
     li.querySelector('select').addEventListener('change', e => { setOv(i, { layout: e.target.value || undefined }); replan(); });
     li.querySelector('.dice').addEventListener('click', () => { const cur = ov[i] || {}; setOv(i, { seed: (cur.seed | 0) + 1, lock: false }); replan(); seek(ln.start + 0.001); });
@@ -854,16 +863,33 @@ function validateTiming(starts, end) {
     throw new Error('行の順序が前後しています。開始秒は0秒以降、歌い終わりより前で、前の行より後にしてください。');
   }
 }
-function timingWithTimes(starts, end, anchors) {
+function timingWithTimes(starts, end, anchors, ends = null) {
   validateTiming(starts, end);
-  const autoTimes = {}, lineTimes = {};
+  const autoTimes = {}, lineTimes = {}, lineEnds = {};
   starts.forEach((value, i) => { autoTimes[i] = value; if (anchors[i] != null) lineTimes[i] = value; });
-  return Object.assign({}, S.project.timing, { autoStart: starts[0], offset: starts[0], autoEnd: end, autoTimes, lineTimes, ignoreLrc: true });
+  if (ends) {
+    ends.forEach((value, i) => {
+      if (!Number.isFinite(value) || value <= starts[i] || value > (starts[i + 1] ?? end) + 1e-7) throw new Error('表示終了は開始より後、次の行の開始までにしてください。');
+      lineEnds[i] = value;
+    });
+  } else if (Object.keys(S.project.timing.lineEnds || {}).length) {
+    // Reallocation keeps explicitly edited durations where space permits.
+    const current = effectiveTiming();
+    starts.forEach((value, i) => {
+      if (S.project.timing.lineEnds[i] != null && current.starts[i] != null) lineEnds[i] = Math.min(starts[i + 1] ?? end, value + current.ends[i] - current.starts[i]);
+    });
+  }
+  return Object.assign({}, S.project.timing, { autoStart: starts[0], offset: starts[0], autoEnd: end, autoTimes, lineTimes, lineEnds, ignoreLrc: true });
 }
 function applyTiming(timing, message) {
   rememberTiming(); S.project.timing = timing;
   $('timingStatus').textContent = message;
   syncUI(); replan();
+}
+function keepExplicitEnds(timing, added = []) {
+  const keep = new Set([...Object.keys(S.project.timing.lineEnds || {}), ...added.map(String)]);
+  for (const key of Object.keys(timing.lineEnds)) if (!keep.has(key)) delete timing.lineEnds[key];
+  return timing;
 }
 function changeTimingRange(start, end) {
   if (!timingAvailable()) { syncUI(); return; }
@@ -873,7 +899,8 @@ function changeTimingRange(start, end) {
     end = end == null || end === '' ? (S.audio ? S.audio.duration : oldEnd + start - oldStart) : Number(end);
     if (!Number.isFinite(start) || start < 0 || !Number.isFinite(end) || end <= start || !(oldEnd > oldStart)) throw new Error('歌い始めより後に歌い終わりを指定してください。');
     const starts = current.starts.map((value, i) => i === 0 ? start : start + (value - oldStart) / (oldEnd - oldStart) * (end - start));
-    applyTiming(timingWithTimes(starts, end, timingAnchors(current.lines)), '歌唱範囲を反映しました。各行の間隔の比率を保って移動しました。');
+    const ends = current.ends.map(value => start + (value - oldStart) / (oldEnd - oldStart) * (end - start));
+    applyTiming(keepExplicitEnds(timingWithTimes(starts, end, timingAnchors(current.lines), ends)), '歌唱範囲を反映しました。各行の間隔の比率を保って移動しました。');
   } catch (error) { syncUI(); $('timingStatus').textContent = error.message; }
 }
 function shiftTiming(delta, from = Number($('timingFrom').value), to = Number($('timingTo').value)) {
@@ -884,8 +911,50 @@ function shiftTiming(delta, from = Number($('timingFrom').value), to = Number($(
     const starts = current.starts.map((value, i) => value + (i >= from && i <= to ? delta : 0));
     let end = current.ends.at(-1);
     if (to === starts.length - 1) end = Math.min(end + delta, S.audio?.duration ?? Infinity);
-    applyTiming(timingWithTimes(starts, end, timingAnchors(current.lines)), `${from + 1}〜${to + 1}行目を${delta >= 0 ? '+' : ''}${delta.toFixed(2)}秒移動しました。`);
+    const ends = current.ends.map((value, i) => S.project.timing.lineEnds?.[i] != null ? value + (i >= from && i <= to ? delta : 0) : (starts[i + 1] ?? end));
+    applyTiming(keepExplicitEnds(timingWithTimes(starts, end, timingAnchors(current.lines), ends)), `${from + 1}〜${to + 1}行目を${delta >= 0 ? '+' : ''}${delta.toFixed(2)}秒移動しました。`);
   } catch (error) { $('timingStatus').textContent = error.message; }
+}
+function setLineEnd(i, end) {
+  if (!timingAvailable()) return;
+  try {
+    const current = effectiveTiming(); end = Number(end);
+    const upper = current.starts[i + 1] ?? S.audio?.duration ?? Infinity;
+    if (!Number.isFinite(end) || end <= current.starts[i] || end > upper) throw new Error('表示終了は開始より後、次の行の開始（または曲の終わり）までにしてください。');
+    const ends = current.ends.slice(); ends[i] = end;
+    applyTiming(keepExplicitEnds(timingWithTimes(current.starts, ends.at(-1), timingAnchors(current.lines), ends), [i]), `${i + 1}行目の表示時間を${(end - current.starts[i]).toFixed(2)}秒にしました。`);
+  } catch (error) { $('timingStatus').textContent = error.message; renderLines(); }
+}
+function setLineDuration(i, duration) { setLineEnd(i, effectiveTiming().starts[i] + Number(duration)); }
+function stretchTiming({ from = Number($('timingFrom').value), to = Number($('timingTo').value), duration, moveFollowing = $('timingFollow').checked } = {}) {
+  if (!timingAvailable()) return;
+  try {
+    const current = effectiveTiming(); duration = Number(duration);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to >= current.starts.length || !Number.isFinite(duration) || duration <= 0) throw new Error('行の範囲と0秒より長い表示時間を指定してください。');
+    const start = current.starts[from], oldEnd = current.ends[to], oldDuration = oldEnd - start;
+    const factor = duration / oldDuration, delta = duration - oldDuration;
+    const transform = (value, i) => i >= from && i <= to ? start + (value - start) * factor : (i > to && moveFollowing ? value + delta : value);
+    const starts = current.starts.map(transform), ends = current.ends.map(transform);
+    const selected = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+    applyTiming(keepExplicitEnds(timingWithTimes(starts, ends.at(-1), timingAnchors(current.lines), ends), selected), `${from + 1}〜${to + 1}行目の表示区間を${duration.toFixed(2)}秒にしました。曲の速度は変わりません。`);
+  } catch (error) { $('timingStatus').textContent = error.message; }
+}
+function applyLineSpeed(i, factor) {
+  const current = effectiveTiming(); factor = Number(factor);
+  if (!Number.isFinite(factor) || factor <= 0) { $('timingStatus').textContent = '表示速度は0より大きい値にしてください。'; return; }
+  stretchTiming({ from: i, to: i, duration: (current.ends[i] - current.starts[i]) / factor });
+}
+function stretchBySpeed() {
+  const current = effectiveTiming(), from = Number($('timingFrom').value), to = Number($('timingTo').value), factor = Number($('timingSpeed').value);
+  if (!Number.isFinite(factor) || factor <= 0) { $('timingStatus').textContent = '表示速度は0より大きい値にしてください。'; return; }
+  stretchTiming({ from, to, duration: (current.ends[to] - current.starts[from]) / factor });
+}
+function stretchByBars() {
+  const bpmInput = $('timingDurationBpm').value;
+  const bpm = bpmInput === '' ? (S.project.timing.bpm || S.audio?.bpm) : Number(bpmInput);
+  const bars = Number($('timingBars').value), beats = Number($('timingBeatsPerBar').value);
+  if (!(bpm > 0) || !Number.isFinite(bpm) || !(bars > 0) || ![3, 4, 6].includes(beats)) { $('timingStatus').textContent = '小節数・1小節の拍数・BPMを指定してください。'; return; }
+  stretchTiming({ duration: bars * beats * 60 / bpm });
 }
 function allocationOptions(start, end, anchors) {
   return { start, end, anchors, ignoreLrc: true, spacing: S.project.timing.spacing || 'lyrics', snapStrength: S.project.timing.snapStrength ?? 0.65 };
@@ -919,7 +988,8 @@ function setLineTime(i, value) {
   if (Number.isFinite(value)) times[i] = value; else delete times[i];
   const candidate = Object.assign({}, S.project, { timing: Object.assign({}, S.project.timing, { lineTimes: times }) });
   const actual = J.computeTiming(candidate, J.parseLyrics(S.project.lyrics), audioLike()).starts[i];
-  if (!Number.isFinite(actual) || actual < 0 || actual <= previous || actual >= next) {
+  const end = S.project.timing.lineEnds?.[i], previousEnd = S.project.timing.lineEnds?.[i - 1];
+  if (!Number.isFinite(actual) || actual < 0 || actual <= previous || actual >= next || (end != null && actual >= end) || (previousEnd != null && actual < previousEnd)) {
     $('timingStatus').textContent = '開始秒は前の行より後、次の行（または歌い終わり）より前にしてください。';
     renderLines(); return;
   }
@@ -936,7 +1006,7 @@ function updateLyrics(raw) {
   if (signature(oldLines) !== signature(newLines)) {
     const freshLrc = newLines.some((line, i) => line.lrc != null && line.lrc !== oldLines[i]?.lrc);
     if (S.tap) { S.tap = null; pause(); $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false'); }
-    const oldTimes = S.project.timing.lineTimes || {}, mapped = {};
+    const oldTimes = S.project.timing.lineTimes || {}, mapped = {}, mappedEnds = {};
     const oldIndices = new Map(), newIndices = new Map();
     oldLines.forEach((l, i) => oldIndices.set(l.text, [...(oldIndices.get(l.text) || []), i]));
     newLines.forEach((l, i) => newIndices.set(l.text, [...(newIndices.get(l.text) || []), i]));
@@ -948,6 +1018,7 @@ function updateLyrics(raw) {
       if (oldIndex < 0 && oldLines.length === newLines.length &&
           (oldLines[i].text === line.text || (!oldMatches.length && !newIndices.has(oldLines[i].text)))) oldIndex = i;
       if (oldIndex >= 0 && oldTimes[oldIndex] != null && !(freshLrc && line.lrc != null && line.lrc !== oldLines[oldIndex].lrc)) mapped[i] = oldTimes[oldIndex];
+      if (!freshLrc && oldIndex >= 0 && S.project.timing.lineEnds?.[oldIndex] != null) mappedEnds[i] = S.project.timing.lineEnds[oldIndex];
     });
     if (freshLrc) {
       // Newly supplied timestamps are an explicit new timeline. A previous
@@ -965,6 +1036,7 @@ function updateLyrics(raw) {
       else previous = value;
     }
     S.project.timing.lineTimes = mapped;
+    S.project.timing.lineEnds = mappedEnds;
     S.project.timing.autoTimes = {};
     timingUndo = null; $('btnUndoTiming').disabled = true;
     $('timingStatus').textContent = (oldLines.length !== newLines.length ? '行数が変わりました。対応する行の手修整を引き継ぎました。' : '歌詞を変更しました。対応する行の手修整を保ちました。') +
@@ -1056,6 +1128,7 @@ function syncUI() {
   $('autoStart').value = effectiveStart;
   $('autoEnd').value = S.project.timing.autoEnd ?? '';
   $('autoEnd').placeholder = S.audio ? S.audio.duration.toFixed(2) : '曲の終わり';
+  $('timingDurationBpm').placeholder = String(S.project.timing.bpm || S.audio?.bpm || 'BPMを入力');
   $('btnAutoTiming').disabled = !S.audio;
   $('timingMode').value = S.project.timing.mode || 'keep';
   $('timingSpacing').value = S.project.timing.spacing || 'lyrics';
@@ -1099,6 +1172,9 @@ function bind() {
     const from = Number($('timingFrom').value), starts = effectiveTiming().starts;
     shiftTiming(currentSongTime() - starts[from]);
   });
+  $('btnStretchSeconds').addEventListener('click', () => stretchTiming({ duration: Number($('timingTargetDuration').value) }));
+  $('btnStretchSpeed').addEventListener('click', stretchBySpeed);
+  $('btnStretchBars').addEventListener('click', stretchByBars);
   $('playbackRate').addEventListener('change', e => {
     const position = currentSongTime(), rate = Number(e.target.value);
     if (![1, 0.75, 0.5].includes(rate)) return;

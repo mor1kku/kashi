@@ -71,4 +71,21 @@ for (const mode of ['manual', 'auto']) {
   assert.equal(plan.lines[1].end, 5.321);
   assert.equal(plan.cuts.filter(cut => cut.line === 1).at(-1).end, 5.321);
 }
-console.log('planner timing: priority, LRC reset, explicit end and exact cut-boundary regressions passed');
+const gapped = core.defaultProject();
+gapped.lyrics = 'A\nB\nC';
+Object.assign(gapped.timing, { lineTimes: { 0: 1, 1: 9, 2: 16 }, lineEnds: { 0: 7, 1: 12, 2: 20 }, autoEnd: 20, ignoreLrc: true });
+const gapPlan = core.plan(gapped, { duration: 22 });
+assert.deepEqual(Array.from(gapPlan.lines, line => [line.start, line.end, line.visEnd]), [[1, 7, 7], [9, 12, 12], [16, 20, 20]], 'explicit ends preserve gaps and override the default short-lyric visual cap');
+for (const line of gapPlan.lines) {
+  const cuts = gapPlan.cuts.filter(cut => cut.line === line.index && cut.layout !== 'interlude');
+  assert.equal(cuts[0].start, line.start);
+  assert.equal(cuts.at(-1).end, line.end);
+  assert.ok(cuts.every(cut => cut.start >= line.start && cut.end <= line.end), 'lyric cuts must stay within their exact line interval');
+}
+assert.ok(gapPlan.cuts.every(cut => cut.layout === 'interlude' || cut.end <= 7 || cut.start >= 9), 'no lyric cut enters the first interlude');
+assert.equal(gapPlan.duration, 22);
+result = J.computeTiming({ timing: { lineTimes: { 0: 1, 1: 4 }, lineEnds: { 0: 6, 1: -2 } } }, { lines: [{ text: 'A' }, { text: 'B' }] }, { duration: 8 });
+assert.deepEqual(Array.from(result.ends), [4, 5.5], 'invalid overlapping/negative imported ends fall back safely');
+result = J.computeTiming({ timing: { lineTimes: { 0: 1 }, lineEnds: { 0: 8 } } }, { lines: [{ text: 'A' }] }, { duration: 8 });
+assert.equal(result.duration, 8, 'explicit final end adds no silence to the song');
+console.log('planner timing: priorities, explicit ends, interludes and exact cut-boundary regressions passed');
