@@ -37,10 +37,27 @@
 
       <div class="sec">
         <div class="sec-h"><h2>曲とタイミング</h2></div>
-        <div id="audioName" class="muted audio-name">曲なし（読み込むと拍を検出してカットを合わせます）</div>
+        <div id="audioName" class="muted audio-name">曲なし（歌詞を入力してから曲を読み込むと、自動で仮配置します）</div>
         <div class="row">
           <label class="file" title="mp3 / wav / m4a など">曲を読み込む<input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"></label>
           <button id="btnTap" title="曲を再生しながら各行の頭でタップ">タップで同期</button>
+        </div>
+        <div class="timing-guide">
+          <p class="hint">① 歌詞と曲を読み込む → ② 自動で仮配置 → ③ 再生しながら行ごとに修整</p>
+          <div class="fields">
+            <label class="field">歌い出し(秒)<input id="autoStart" type="number" min="0" step="0.01" value="0"></label>
+            <label class="field">歌い終わり(秒)<input id="autoEnd" type="number" min="0" step="0.01" placeholder="曲の終わり"></label>
+          </div>
+          <div class="row">
+            <button id="btnAutoStart" class="ghost small">今の位置を歌い出しに</button>
+            <button id="btnAutoEnd" class="ghost small">今の位置を歌い終わりに</button>
+          </div>
+          <div class="row">
+            <button id="btnAutoTiming" class="accent" disabled>曲に合わせて仮配置</button>
+            <button id="btnUndoTiming" class="ghost small" disabled>配置を元に戻す</button>
+          </div>
+          <p class="hint">拍・音量・歌詞の長さからの目安です。歌声の認識ではないため、前奏・間奏や歌い回しは手修整してください。再配置しても手修整とLRCの時刻は保ちます。</p>
+          <p id="timingStatus" class="hint" role="status" aria-live="polite"></p>
         </div>
         <div class="fields pro-only">
           <label class="field">BPM<input id="bpm" type="number" min="0" max="300" step="0.1" placeholder="自動"></label>
@@ -49,7 +66,7 @@
         </div>
         <div class="row pro-only">
           <label class="row" style="gap:6px"><input id="snap" type="checkbox"> 拍にスナップ</label>
-          <button id="btnResetTimes" class="ghost small">手動タイミングを消す</button>
+          <button id="btnResetTimes" class="ghost small">手修整を消す</button>
         </div>
         <div id="tapPanel" class="tapbox" hidden>
           <div class="hint">曲に合わせて、各行が始まる瞬間に <span class="kbd">Space</span> かボタンを押してください。</div>
@@ -61,6 +78,7 @@
 
       <div class="sec">
         <div class="sec-h"><h2>行とカット</h2><span id="linesInfo" class="muted mono"></span></div>
+        <p class="hint">歌詞を押すとその行へ移動。開始秒、±0.1秒、または「今の位置」で調整できます。</p>
         <ol id="lineList"></ol>
       </div>
     </section>
@@ -86,6 +104,16 @@
 
     <!-- ================= right: look & output ================= -->
     <section class="col col-right" aria-label="スタイルと書き出し">
+      <div id="exportRecovery" class="sec" hidden>
+        <a id="recoveryLink" class="file">編集データを保存</a>
+        <p class="hint">書き出し前の編集データです。ページを開き直してもブラウザの保存から復元します。念のためファイルでも保存できます（曲・写真の実体は含みません）。</p>
+      </div>
+      <div id="downloadResult" class="sec" hidden>
+        <h3>書き出したファイル</h3>
+        <p id="downloadName" class="hint"></p>
+        <div class="row"><a id="downloadLink" class="file">ダウンロード</a><a id="downloadOpen" target="_blank" rel="noopener">ファイルを開く</a></div>
+        <p class="hint">「ダウンロード」を押して保存してください。保存できない端末では「ファイルを開く」から保存・共有できます。次の書き出し開始まで再保存できます。</p>
+      </div>
       <div id="easyPanel" class="easy" hidden>
         <div class="easy-hero">
           <button id="btnOmakaseBig" class="omakase">おまかせで作る</button>
@@ -228,3 +256,4 @@
     </section>
   </main>
 </div>
+
