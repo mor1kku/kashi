@@ -254,3 +254,12 @@ button.omakase:disabled { box-shadow: none; }
 .storage-warning { margin: 10px 16px; padding: 12px; border: 1px solid var(--amber); border-radius: var(--r); background: var(--raised); }
 .storage-warning .row { flex-wrap: wrap; }
 .storage-warning a { color: var(--cyan); cursor: pointer; }
+
+.timing-adjust { margin-top: 10px; padding: 8px; border: 1px solid var(--line2); border-radius: var(--r); }
+.timing-adjust summary { cursor: pointer; margin-bottom: 8px; }
+.timing-adjust .field { min-width: 0; }
+.timing-adjust select { max-width: 100%; }
+.timing-snap { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; font-size: 11px; }
+.timing-snap input { flex: 1; min-width: 80px; }
+.preview-speed { display: flex; gap: 4px; align-items: center; font-size: 11px; }
+.preview-speed select { padding: 3px; }

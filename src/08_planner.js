@@ -18,7 +18,7 @@ J.defaultProject = () => ({
   aspect: '16:9', res: 1080, fps: 24,
   fx: { motion: 0.7, glitch: 0.55, chroma: 0.7, decor: 0.5, density: 0.55, texture: 0.6, flash: true, onTwos: true, koma: 12, hud: 'auto', bgSwitch: 0.35 },
   enabled: Object.fromEntries(J.GROUP_KEYS.map(g => [g, Object.fromEntries(J.order(g).map(k => [k, true]))])),
-  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, autoTimes: {}, lineScale: 1 },
+  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, autoTimes: {}, ignoreLrc: false, lineScale: 1 },
   overrides: {},
   colors: { enabled: false },
   fonts: {},
@@ -138,7 +138,7 @@ J.computeTiming = (project, parsed, audio) => {
     let s;
     // An imported LRC timestamp is a starting point, and remains editable.
     if (man != null && Number.isFinite(man)) s = man;
-    else if (l.lrc != null && Number.isFinite(+l.lrc)) s = +l.lrc;
+    else if (!T.ignoreLrc && l.lrc != null && Number.isFinite(+l.lrc)) s = +l.lrc;
     else if (auto != null && Number.isFinite(auto)) s = auto;
     else {
       if (i > 0) {
@@ -150,10 +150,11 @@ J.computeTiming = (project, parsed, audio) => {
     }
     starts.push(s);
   });
+  const hasExplicitEnd = starts.length > 0 && T.autoEnd != null && Number.isFinite(+T.autoEnd) && +T.autoEnd > starts[starts.length - 1];
   const ends = starts.map((s, i) => {
     // Closely spaced phrases must not keep the previous lyric over the next one.
     if (i < starts.length - 1) return starts[i + 1] > s ? starts[i + 1] : s + 0.35;
-    if (hasAutoTimes && T.autoEnd != null && Number.isFinite(+T.autoEnd) && +T.autoEnd > s) return +T.autoEnd;
+    if (hasExplicitEnd) return +T.autoEnd;
     const n = [...lines[i].text].length;
     let d = J.clamp(0.8 + n * 0.17, 1.5, 5.2) * (T.lineScale || 1);
     if (beat) d = Math.max(2, Math.round(d / beat)) * beat;
@@ -161,7 +162,7 @@ J.computeTiming = (project, parsed, audio) => {
     return s + d;
   });
   let duration = (ends.length ? ends[ends.length - 1] : 3) + (T.tail ?? 0.9);
-  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + (hasAutoTimes ? 0 : 0.2) : 1);
+  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + (hasAutoTimes || hasExplicitEnd ? 0 : 0.2) : 1);
   return { starts, ends, duration };
 };
 
