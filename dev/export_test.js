@@ -56,7 +56,7 @@ function setup(options = {}) {
   vm.runInNewContext(source, context);
   return { J, state, context };
 }
-const args = { plan: { fps: 30, duration: 0.1, W: 1280 }, project: {} };
+const args = { plan: { fps: 30, duration: 0.1, W: 1280 }, project: { includeAudio: false } };
 function cleaned(J, state) { assert.equal(J.glyphs.maxRes, 123); assert.ok(state.encoders.every(e => e.state === 'closed')); assert.ok(state.frames.every(f => f.closed)); }
 test('completed export returns MP4 and releases frame/encoder resources', async () => {
   const { J, state } = setup();
@@ -85,23 +85,23 @@ test('pre-aborted export does not start encoding', async () => {
 });
 test('unsupported audio fails explicitly rather than silently exporting mute video', async () => {
   const { J } = setup();
-  await assert.rejects(J.exportMP4({ ...args, audio: { buffer: { numberOfChannels: 2 } } }), /音声付きMP4/);
+  await assert.rejects(J.exportMP4({ ...args, project: { includeAudio: true }, audio: { buffer: { numberOfChannels: 2 } } }), /音声付きMP4/);
 });
 test('audio export completes and closes both encoders', async () => {
   const { J, state } = setup({ audioSupport: true });
-  const result = await J.exportMP4({ ...args, audio: { buffer: { numberOfChannels: 2 } } });
+  const result = await J.exportMP4({ ...args, project: { includeAudio: true }, audio: { buffer: { numberOfChannels: 2 } } });
   assert.equal(result.audio, 'aac'); assert.equal(state.encoders.length, 2); cleaned(J, state);
 });
 for (const [option, message] of [['audioEncodeError', 'audio encode failed'], ['audioMuxError', 'audio mux failed']]) {
   test(`${option} rejects and frees both encoders`, async () => {
     const { J, state } = setup({ audioSupport: true, [option]: true });
-    await assert.rejects(J.exportMP4({ ...args, audio: { buffer: { numberOfChannels: 2 } } }), new RegExp(message));
+    await assert.rejects(J.exportMP4({ ...args, project: { includeAudio: true }, audio: { buffer: { numberOfChannels: 2 } } }), new RegExp(message));
     assert.equal(state.finalized, false); cleaned(J, state);
   });
 }
 test('cancel interrupts audio queue backpressure', { timeout: 2000 }, async () => {
   const { J, state } = setup({ audioSupport: true, audioStall: true }); const controller = new AbortController();
-  const promise = J.exportMP4({ ...args, audio: { buffer: { numberOfChannels: 2 } }, signal: controller.signal });
+  const promise = J.exportMP4({ ...args, project: { includeAudio: true }, audio: { buffer: { numberOfChannels: 2 } }, signal: controller.signal });
   setTimeout(() => controller.abort(), 20);
   await assert.rejects(promise, /キャンセル/); assert.equal(state.encoders.length, 2); cleaned(J, state);
 });
@@ -143,7 +143,7 @@ test('actual encoded size is also bounded when a codec exceeds its target bitrat
 test('audio resampling is bounded to five seconds with continuous absolute timestamps', async () => {
   const { J, state } = setup({ audioSupport: true });
   const duration = 12.05, sr = 48000;
-  await J.exportMP4({ ...args, plan: { ...args.plan, fps: 1, duration }, audio: { buffer: { numberOfChannels: 2, duration: 11 } } });
+  await J.exportMP4({ ...args, project: { includeAudio: true }, plan: { ...args.plan, fps: 1, duration }, audio: { buffer: { numberOfChannels: 2, duration: 11 } } });
   assert.deepEqual(state.resampleWindows, [{ length: 240000, offset: 0 }, { length: 240000, offset: 5 }, { length: 98400, offset: 10 }]);
   let samples = 0;
   for (const frame of state.audioData) {
@@ -152,4 +152,12 @@ test('audio resampling is bounded to five seconds with continuous absolute times
   }
   assert.equal(samples, Math.ceil(duration * sr), 'partial final audio block keeps the exact duration');
   cleaned(J, state);
+});
+
+test('audio requested without a loaded song fails before encoding', async () => {
+  const { J, state } = setup();
+  await assert.rejects(J.exportMP4({ ...args, project: {} }), /音声が未読込/);
+  await assert.rejects(J.exportMP4({ ...args, project: { includeAudio: true }, audio: {} }), /音声が未読込/);
+  assert.equal(state.encoders.length, 0);
+  assert.equal(state.muxConfig, undefined);
 });
