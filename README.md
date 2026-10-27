@@ -245,6 +245,12 @@ python3 build_ae.py           # ae/ → JIZURA_AE.jsx
 
 表示終了はプロジェクトの `timing.lineEnds` に、開始秒は `timing.lineTimes` / `timing.autoTimes` に保存されます。明示した終了は次の行の開始を越えません。
 
+## MP4の音声形式
+
+音声付きMP4はAAC-LCで書き出します。ブラウザ標準のAACエンコードが使えない場合は、同梱のWebAssemblyエンコーダーでAACへ変換します。OpusをMP4に入れるフォールバックは使いません。変換はブラウザ内で完結し、曲はアップロードされません。
+
+音声変換の準備は映像の処理前に確認し、音声が生成されなければ完成扱いにしません。書き出し中は音声ON/OFFを固定し、キャンセル時には音声処理用のWorkerも終了します。
+
 ## 音声を含む編集データ
 
 - 「保存」のJSONには、読み込み済みの曲を含めます。別の端末でも、そのJSONを「開く」で指定すれば曲と歌詞の時刻を復元できます。
@@ -275,3 +281,7 @@ python3 build.py
 行ごとの終了・表示時間・速度、小節指定と後続行移動のブラウザ回帰テスト: `python3 dev/duration_workflow_test.py`。
 
 音声入りJSON・ブラウザ再読込・無音書き出し防止・完成MP4の実音声の検証: `python3 dev/audio_project_workflow_test.py`（Playwright・Chromium・ffmpegが必要）。
+
+AAC非対応環境の検証: `JIZURA_FORCE_SOFTWARE_AAC=1 python3 dev/audio_project_workflow_test.py`。標準のAudioEncoder/AudioDataを無効にし、実際の書き出し音声がAACで非無音であることを検証します。
+
+通常のビルドではAAC実行用ファイルを `vendor/aac-encoder.browser.js` に生成し、同じサイトから読み込みます。HTML単体で配布する場合は `python3 build.py --standalone` を使います。

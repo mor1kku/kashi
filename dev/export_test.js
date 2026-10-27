@@ -35,14 +35,17 @@ function setup(options = {}) {
       constructor(config) { state.muxConfig = config; }
       addVideoChunk() { if (options.muxError) throw new Error('mux failed'); }
       addAudioChunk() { if (options.audioMuxError) throw new Error('audio mux failed'); }
+      addAudioChunkRaw(data) { state.rawAudioBytes = (state.rawAudioBytes || 0) + data.byteLength; }
       finalize() { state.finalized = true; }
     } }
   };
   if (options.audioSupport) {
     context.AudioEncoder = class extends Encoder {
+      static async isConfigSupported(config) { state.audioProbe = config.codec; return { supported: options.aacSupport !== false }; }
       encode(frame) {
         if (options.audioStall) { this.encodeQueueSize = 17; return; }
         if (options.audioEncodeError) throw new Error('audio encode failed');
+        if (options.noAudioChunks) return;
         super.encode(frame);
       }
     };
@@ -51,6 +54,16 @@ function setup(options = {}) {
       constructor(channels, length) { this.channels = channels; this.length = length; this.window = { length }; state.resampleWindows.push(this.window); }
       createBufferSource() { return { connect() {}, start: (_, offset) => { this.window.offset = offset; } }; }
       async startRendering() { return { numberOfChannels: this.channels, length: this.length, getChannelData: () => new Float32Array(this.length) }; }
+    };
+  }
+  if (options.noAudioData) delete context.AudioData;
+  if (options.softwareAudio) J.createSoftwareAacEncoder = async (config, output, signal) => {
+    if (options.softwareInitError) throw new Error('software init failed');
+    state.softwareConfig = config; state.softwareInputs = []; state.softwareClosed = false;
+    return {
+      async encode(data) { state.softwareInputs.push(data.length); if (!options.noAudioChunks) output({data: new Uint8Array(12), timestamp: 0, duration: 1000}, {}); },
+      async flush() { state.softwareFlushed = true; },
+      close() { state.softwareClosed = true; }
     };
   }
   vm.runInNewContext(source, context);
@@ -160,4 +173,27 @@ test('audio requested without a loaded song fails before encoding', async () => 
   await assert.rejects(J.exportMP4({ ...args, project: { includeAudio: true }, audio: {} }), /音声が未読込/);
   assert.equal(state.encoders.length, 0);
   assert.equal(state.muxConfig, undefined);
+});
+
+test('AAC unsupported uses software AAC, never substitutes Opus', async () => {
+  const {J,state} = setup({audioSupport:true,aacSupport:false,softwareAudio:true});
+  const result=await J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:2,duration:1}}});
+  assert.equal(state.audioProbe,'mp4a.40.2'); assert.equal(result.audio,'aac');
+  assert.equal(state.muxConfig.audio.codec,'aac'); assert.equal(state.softwareFlushed,true);
+  assert.equal(state.softwareClosed,true); assert.equal(state.rawAudioBytes,12); cleaned(J,state);
+});
+test('software AAC also works without the AudioData API', async () => {
+  const {J,state} = setup({audioSupport:true,noAudioData:true,softwareAudio:true});
+  const result=await J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:1,duration:1}}});
+  assert.equal(result.audio,'aac'); assert.equal(state.softwareConfig.numberOfChannels,1); cleaned(J,state);
+});
+test('AAC worker initialization failure rejects before any video encoding', async () => {
+  const {J,state} = setup({audioSupport:true,aacSupport:false,softwareAudio:true,softwareInitError:true});
+  await assert.rejects(J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:2}}}),/software init failed/);
+  assert.equal(state.encoders.length,0); assert.equal(state.finalized,false);
+});
+for (const softwareAudio of [false,true]) test('no audio packets prevents a completed silent MP4: software='+softwareAudio,async()=>{
+  const {J,state}=setup({audioSupport:true,aacSupport:!softwareAudio,softwareAudio,noAudioChunks:true});
+  await assert.rejects(J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:2,duration:1}}}),/音声を書き出せなかった/);
+  assert.equal(state.finalized,false); if(softwareAudio) assert.equal(state.softwareClosed,true); cleaned(J,state);
 });

@@ -211,6 +211,7 @@ function syncAudioStatus() {
   $('fileProject').disabled = !!S.exporting;
   $('audioFile').disabled = !!S.exporting;
   $('btnSave').disabled = S.audioBusy || !!S.exporting;
+  $('outAudio').disabled = $('eAudio').disabled = !!S.exporting;
 }
 async function cacheAudio(project, file) {
   try { await J.projectAudio.store(project.audioAsset, file); }
@@ -904,6 +905,9 @@ async function runExport(kind) {
   }
   pause();
   if (S.tap) stopTap();
+  const exportProject = JSON.parse(JSON.stringify(S.project));
+  const exportPlan = S.plan;
+  const exportAudio = exportProject.includeAudio !== false ? S.audio : null;
   // Release the previous video before allocating another export.
   if (lastDownload) { lastDownload.dispose(); lastDownload = null; }
   $('downloadLink').removeAttribute('href'); $('downloadOpen').removeAttribute('href');
@@ -922,11 +926,9 @@ async function runExport(kind) {
     await prepareRecovery();
     await J.ensureFonts(S.project.lyrics + (S.project.title || '') + (S.project.artist || '') + HUD_CHARS, null);
     if (kind === 'mp4') {
-      const r = await J.exportMP4({ plan: S.plan, project: S.project, audio: S.project.includeAudio !== false ? S.audio : null, quality: S.project.quality || 'high', onProgress, signal: ac.signal });
+      const r = await J.exportMP4({ plan: exportPlan, project: exportProject, audio: exportAudio, quality: exportProject.quality || 'high', onProgress, signal: ac.signal });
       txt.textContent = `完成 ${(r.blob.size / 1048576).toFixed(1)}MB・${r.codec}${r.audio ? ' + ' + r.audio.toUpperCase() : ''}・${((performance.now() - t0) / 1000).toFixed(0)}秒`;
-      const audioNote = r.audio === 'opus'
-        ? '音声入りです。ただし、このブラウザの音声形式は一部のスマホの再生アプリに対応していません。音が出ない場合はChromeなどの対応プレーヤーで再生してください。'
-        : r.audio ? '音声入りのMP4です。' : '「曲を動画に含める」がOFFのため、音声なしのMP4です。';
+      const audioNote = r.audio ? '音声入りのMP4です（AAC）。' : '「曲を動画に含める」がOFFのため、音声なしのMP4です。';
       await offerDownload(baseName() + '.mp4', r.blob, audioNote);
       txt.textContent += '・ダウンロードを押して保存';
     } else {
