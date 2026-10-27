@@ -13,21 +13,22 @@ const ICON = {
   lock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>',
 };
 
-const S = { project: null, plan: null, audio: null, renderer: new J.Renderer(), playing: false, t: 0, t0: 0, loop: true, need: true, exporting: null, tap: null, slow: false, lineEls: [], curLine: -2 };
+const S = { project: null, plan: null, audio: null, renderer: new J.Renderer(), playing: false, t: 0, t0: 0, previewRate: 1, loop: true, need: true, exporting: null, tap: null, slow: false, lineEls: [], curLine: -2 };
 
 /* WebAudio player (works inside sandboxed pages where blob media may be blocked) */
 const AP = {
-  ctx: null, src: null, startAt: 0,
+  ctx: null, src: null, startAt: 0, offset: 0, rate: 1,
   play(buffer, offset) {
     if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (this.ctx.state === 'suspended') this.ctx.resume();
     this.stop();
     const s = this.ctx.createBufferSource(); s.buffer = buffer; s.connect(this.ctx.destination);
     const off = Math.max(0, Math.min(offset, buffer.duration - 0.01));
-    s.start(0, off); this.src = s; this.startAt = this.ctx.currentTime - off;
+    this.rate = S.previewRate || 1; s.playbackRate.value = this.rate;
+    s.start(0, off); this.src = s; this.startAt = this.ctx.currentTime; this.offset = off;
   },
   stop() { if (this.src) { try { this.src.stop(); } catch (e) {} try { this.src.disconnect(); } catch (e) {} this.src = null; } },
-  time() { return this.ctx ? this.ctx.currentTime - this.startAt : 0; },
+  time() { return this.ctx ? this.offset + (this.ctx.currentTime - this.startAt) * this.rate : 0; },
 };
 
 /* ---------------- project persistence ---------------- */
@@ -272,7 +273,7 @@ function tick(now) {
   if (S.exporting) return;
   if (S.playing) {
     // rAF timestamps can precede the moment play()/seek() stamped t0 → clamp so t never goes negative
-    let t = Math.max(0, S.audio ? AP.time() : (now - S.t0) / 1000);
+    let t = Math.max(0, S.audio ? AP.time() : (now - S.t0) / 1000 * (S.previewRate || 1));
     if (t >= S.plan.duration - 1e-3) {
       if (S.loop && !S.tap) { seek(0); t = 0; }
       else { pause(); t = S.plan.duration - 1e-3; if (S.tap) stopTap(); }
@@ -288,7 +289,7 @@ function updateTimeUI() {
 }
 function play() {
   if (S.audio) AP.play(S.audio.buffer, S.t);
-  else S.t0 = performance.now() - S.t * 1000;
+  else S.t0 = performance.now() - S.t / (S.previewRate || 1) * 1000;
   S.playing = true; $('btnPlay').textContent = '❚❚'; $('btnPlay').setAttribute('aria-label', '一時停止');
 }
 function pause() {
@@ -298,7 +299,7 @@ function pause() {
 function seek(t) {
   S.t = J.clamp(t, 0, Math.max(0, S.plan.duration - 1e-3));
   if (S.audio) { if (S.playing) AP.play(S.audio.buffer, S.t); }
-  else S.t0 = performance.now() - S.t * 1000;
+  else S.t0 = performance.now() - S.t / (S.previewRate || 1) * 1000;
   S.need = true;
 }
 
@@ -371,19 +372,23 @@ function updateCutInfo() {
 function renderLines() {
   const ol = $('lineList'); ol.innerHTML = ''; S.lineEls = []; S.curLine = -2;
   const ov = S.project.overrides;
+  const parsedLines = J.parseLyrics(S.project.lyrics).lines;
   const layoutOpts = '<option value="">自動</option>' + J.LAYOUT_ORDER.map(k => `<option value="${k}">${J.LAYOUTS[k].name}</option>`).join('');
   S.plan.lines.forEach((ln, i) => {
     const o = ov[i] || {};
     const li = document.createElement('li'); li.className = 'ln';
     const manual = S.project.timing.lineTimes && S.project.timing.lineTimes[i] != null;
     const automatic = S.project.timing.autoTimes && S.project.timing.autoTimes[i] != null;
+    const lrcFixed = !S.project.timing.ignoreLrc && parsedLines[i]?.lrc != null;
     li.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span>
-      <input class="time mono" type="number" step="0.01" min="0" value="${ln.start.toFixed(2)}" title="開始（秒）${manual ? '・手修整' : automatic ? '・仮配置' : '・自動'}" aria-label="${i + 1}行目の開始秒" style="${manual ? 'border-color:var(--cyan)' : ''}">
+      <input class="time mono" type="number" step="0.01" min="0" value="${ln.start.toFixed(2)}" title="開始（秒）${manual ? '・手修整（固定）' : lrcFixed ? '・LRC（固定）' : automatic ? '・仮配置' : '・自動'}" aria-label="${i + 1}行目の開始秒" style="${manual || lrcFixed ? 'border-color:var(--cyan)' : ''}">
       <span class="txt" title="${escapeHtml(ln.text)}">${escapeHtml(ln.text)}</span>
       <div class="timing-tools">
         <button class="ghost small earlier" aria-label="${i + 1}行目を0.1秒早める">−0.1秒</button>
         <button class="ghost small later" aria-label="${i + 1}行目を0.1秒遅らせる">＋0.1秒</button>
         <button class="ghost small set-now" title="この行の開始を現在の再生位置に合わせる">今の位置</button>
+        <button class="ghost small anchor-now" title="この行を現在位置に固定し、前後の未固定行を再配置">今に合わせて前後を再配置</button>
+        <button class="ghost small release-time" title="この行の固定を解除して再配置">固定解除</button>
       </div>
       <div class="meta"><span class="cuts"></span>
       <span class="tools">
@@ -398,8 +403,11 @@ function renderLines() {
     });
     li.querySelector('.earlier').addEventListener('click', () => setLineTime(i, ln.start - 0.1));
     li.querySelector('.later').addEventListener('click', () => setLineTime(i, ln.start + 0.1));
-    li.querySelector('.set-now').addEventListener('click', () => setLineTime(i, S.audio && S.playing ? AP.time() : S.t));
-    li.querySelector('.txt').addEventListener('click', () => seek(ln.start + 0.001));
+    li.querySelector('.set-now').addEventListener('click', () => setLineTime(i, currentSongTime()));
+    li.querySelector('.anchor-now').addEventListener('click', () => anchorLineNow(i));
+    li.querySelector('.release-time').addEventListener('click', () => releaseLineTime(i));
+    li.querySelector('.release-time').disabled = !manual && !lrcFixed;
+    li.querySelector('.txt').addEventListener('click', () => { $('timingFrom').value = String(i); $('timingTo').value = String(S.plan.lines.length - 1); seek(ln.start); });
     li.querySelector('select').addEventListener('change', e => { setOv(i, { layout: e.target.value || undefined }); replan(); });
     li.querySelector('.dice').addEventListener('click', () => { const cur = ov[i] || {}; setOv(i, { seed: (cur.seed | 0) + 1, lock: false }); replan(); seek(ln.start + 0.001); });
     li.querySelector('.lock').addEventListener('click', () => {
@@ -418,6 +426,7 @@ function renderLines() {
     ol.appendChild(li); S.lineEls.push(li);
   });
   $('linesInfo').textContent = `${S.plan.lines.length}行 / ${S.plan.cuts.length}カット`;
+  syncTimingSelection();
 }
 function setOv(i, patch) {
   const cur = Object.assign({}, S.project.overrides[i] || {}, patch);
@@ -806,6 +815,100 @@ function rememberTiming() {
   timingUndo = JSON.parse(JSON.stringify(S.project.timing));
   $('btnUndoTiming').disabled = false;
 }
+function currentSongTime() {
+  if (!S.playing) return S.t;
+  return S.audio ? AP.time() : Math.max(0, (performance.now() - S.t0) / 1000 * (S.previewRate || 1));
+}
+function effectiveTiming() {
+  const parsed = J.parseLyrics(S.project.lyrics);
+  return Object.assign({ lines: parsed.lines }, J.computeTiming(S.project, parsed, audioLike()));
+}
+function timingAnchors(lines) {
+  const T = S.project.timing, anchors = {};
+  lines.forEach((line, i) => {
+    const value = T.lineTimes?.[i] ?? (!T.ignoreLrc ? line.lrc : null);
+    if (value != null && Number.isFinite(+value)) anchors[i] = +value;
+  });
+  return anchors;
+}
+function syncTimingSelection() {
+  const count = S.plan.lines.length;
+  for (const [id, fallback] of [['timingFrom', 0], ['timingTo', count - 1]]) {
+    const element = $(id), previous = element.value === '' ? fallback : Number(element.value);
+    element.innerHTML = S.plan.lines.map((line, i) => `<option value="${i}">${i + 1}. ${escapeHtml(line.text.slice(0, 16))}</option>`).join('');
+    element.value = String(Math.max(0, Math.min(count - 1, Number.isFinite(previous) ? previous : fallback)));
+    element.disabled = !count;
+  }
+}
+function timingAvailable() {
+  if (S.exporting || S.tap) {
+    $('timingStatus').textContent = '書き出し・タップ同期を終了してからタイミングを変更してください。';
+    return false;
+  }
+  return true;
+}
+function validateTiming(starts, end) {
+  if (!starts.length) throw new Error('先に歌詞を入力してください。');
+  if (!Number.isFinite(end) || end <= 0 || (S.audio && end > S.audio.duration + 1e-7)) throw new Error('歌い終わりを曲の範囲内で指定してください。');
+  if (starts.some((value, i) => !Number.isFinite(value) || value < 0 || value >= end || (i > 0 && value <= starts[i - 1]))) {
+    throw new Error('行の順序が前後しています。開始秒は0秒以降、歌い終わりより前で、前の行より後にしてください。');
+  }
+}
+function timingWithTimes(starts, end, anchors) {
+  validateTiming(starts, end);
+  const autoTimes = {}, lineTimes = {};
+  starts.forEach((value, i) => { autoTimes[i] = value; if (anchors[i] != null) lineTimes[i] = value; });
+  return Object.assign({}, S.project.timing, { autoStart: starts[0], offset: starts[0], autoEnd: end, autoTimes, lineTimes, ignoreLrc: true });
+}
+function applyTiming(timing, message) {
+  rememberTiming(); S.project.timing = timing;
+  $('timingStatus').textContent = message;
+  syncUI(); replan();
+}
+function changeTimingRange(start, end) {
+  if (!timingAvailable()) { syncUI(); return; }
+  try {
+    const current = effectiveTiming(), oldStart = current.starts[0], oldEnd = current.ends.at(-1);
+    start = Number(start);
+    end = end == null || end === '' ? (S.audio ? S.audio.duration : oldEnd + start - oldStart) : Number(end);
+    if (!Number.isFinite(start) || start < 0 || !Number.isFinite(end) || end <= start || !(oldEnd > oldStart)) throw new Error('歌い始めより後に歌い終わりを指定してください。');
+    const starts = current.starts.map((value, i) => i === 0 ? start : start + (value - oldStart) / (oldEnd - oldStart) * (end - start));
+    applyTiming(timingWithTimes(starts, end, timingAnchors(current.lines)), '歌唱範囲を反映しました。各行の間隔の比率を保って移動しました。');
+  } catch (error) { syncUI(); $('timingStatus').textContent = error.message; }
+}
+function shiftTiming(delta, from = Number($('timingFrom').value), to = Number($('timingTo').value)) {
+  if (!timingAvailable()) return;
+  try {
+    const current = effectiveTiming(); delta = Number(delta);
+    if (!Number.isFinite(delta) || !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to >= current.starts.length) throw new Error('移動する行の範囲と秒数を確認してください。');
+    const starts = current.starts.map((value, i) => value + (i >= from && i <= to ? delta : 0));
+    let end = current.ends.at(-1);
+    if (to === starts.length - 1) end = Math.min(end + delta, S.audio?.duration ?? Infinity);
+    applyTiming(timingWithTimes(starts, end, timingAnchors(current.lines)), `${from + 1}〜${to + 1}行目を${delta >= 0 ? '+' : ''}${delta.toFixed(2)}秒移動しました。`);
+  } catch (error) { $('timingStatus').textContent = error.message; }
+}
+function allocationOptions(start, end, anchors) {
+  return { start, end, anchors, ignoreLrc: true, spacing: S.project.timing.spacing || 'lyrics', snapStrength: S.project.timing.snapStrength ?? 0.65 };
+}
+function reallocateAnchor(i, release) {
+  if (!timingAvailable()) return;
+  try {
+    const current = effectiveTiming(), anchors = timingAnchors(current.lines);
+    if (!current.lines[i]) return;
+    let start = current.starts[0], end = S.project.timing.autoEnd ?? S.audio?.duration ?? current.ends.at(-1);
+    if (release) delete anchors[i];
+    else {
+      anchors[i] = +currentSongTime().toFixed(3);
+      if (i === 0) start = anchors[i];
+    }
+    const audio = Object.assign({}, audioLike() || {}, { duration: S.audio?.duration ?? end });
+    const times = J.autoLyricTimes(current.lines, audio, allocationOptions(start, end, anchors));
+    const starts = current.lines.map((_, index) => times[index]);
+    applyTiming(timingWithTimes(starts, end, anchors), release ? `${i + 1}行目の固定を解除して再配置しました。` : `${i + 1}行目を今の位置に固定し、前後の未固定行を再配置しました。`);
+  } catch (error) { $('timingStatus').textContent = error.message; }
+}
+function anchorLineNow(i) { reallocateAnchor(i, false); }
+function releaseLineTime(i) { reallocateAnchor(i, true); }
 function setLineTime(i, value) {
   if (S.exporting) return;
   if (S.tap) { $('timingStatus').textContent = 'タップ同期を終了してから行を修整してください。'; return; }
@@ -822,13 +925,16 @@ function setLineTime(i, value) {
   }
   rememberTiming();
   S.project.timing.lineTimes = times;
+  if (i === 0) { S.project.timing.autoStart = actual; S.project.timing.offset = actual; }
   $('timingStatus').textContent = `${i + 1}行目のタイミングを更新しました。`;
-  replan();
+  syncUI(); replan();
 }
 function updateLyrics(raw) {
   const oldLines = J.parseLyrics(S.project.lyrics).lines, newLines = J.parseLyrics(raw).lines;
+  let refreshRange = false;
   const signature = lines => JSON.stringify(lines.map(l => [l.text, l.lrc, l.gapBefore]));
   if (signature(oldLines) !== signature(newLines)) {
+    const freshLrc = newLines.some((line, i) => line.lrc != null && line.lrc !== oldLines[i]?.lrc);
     if (S.tap) { S.tap = null; pause(); $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false'); }
     const oldTimes = S.project.timing.lineTimes || {}, mapped = {};
     const oldIndices = new Map(), newIndices = new Map();
@@ -841,12 +947,19 @@ function updateLyrics(raw) {
       // Existing matching rows take priority, so inserted or reordered rows are not misassigned.
       if (oldIndex < 0 && oldLines.length === newLines.length &&
           (oldLines[i].text === line.text || (!oldMatches.length && !newIndices.has(oldLines[i].text)))) oldIndex = i;
-      if (oldIndex >= 0 && oldTimes[oldIndex] != null) mapped[i] = oldTimes[oldIndex];
+      if (oldIndex >= 0 && oldTimes[oldIndex] != null && !(freshLrc && line.lrc != null && line.lrc !== oldLines[oldIndex].lrc)) mapped[i] = oldTimes[oldIndex];
     });
+    if (freshLrc) {
+      // Newly supplied timestamps are an explicit new timeline. A previous
+      // "replace" or range edit must not suppress them or impose its old end.
+      S.project.timing.ignoreLrc = false;
+      delete S.project.timing.autoStart; delete S.project.timing.autoEnd;
+      refreshRange = true;
+    }
     // A reordering can make old anchors contradict the new order. Keep only compatible ones.
     let previous = -1;
     for (let i = 0; i < newLines.length; i++) {
-      const value = mapped[i] != null ? +mapped[i] : newLines[i].lrc;
+      const value = mapped[i] != null ? +mapped[i] : S.project.timing.ignoreLrc ? null : newLines[i].lrc;
       if (value == null) continue;
       if (!Number.isFinite(value) || value <= previous) delete mapped[i];
       else previous = value;
@@ -856,8 +969,10 @@ function updateLyrics(raw) {
     timingUndo = null; $('btnUndoTiming').disabled = true;
     $('timingStatus').textContent = (oldLines.length !== newLines.length ? '行数が変わりました。対応する行の手修整を引き継ぎました。' : '歌詞を変更しました。対応する行の手修整を保ちました。') +
       (S.audio ? '「曲に合わせて仮配置」で再配置してください。' : '曲を読み込んで仮配置してください。');
+    if (freshLrc) $('timingStatus').textContent = '新しいLRCの時刻を反映しました。必要なら歌唱範囲や各行の開始秒を調整してください。';
   }
   S.project.lyrics = raw;
+  if (refreshRange) syncUI();
   replanSoon(260);
 }
 function autoTiming() {
@@ -866,54 +981,59 @@ function autoTiming() {
   try {
     const start = Number($('autoStart').value);
     const end = $('autoEnd').value === '' ? S.audio.duration : Number($('autoEnd').value);
-    const times = J.autoLyricTimes(J.parseLyrics(S.project.lyrics).lines, audioLike(), { start, end, anchors: S.project.timing.lineTimes });
-    rememberTiming();
-    Object.assign(S.project.timing, { autoStart: start, autoEnd: end, autoTimes: times });
-    $('timingStatus').textContent = '仮配置しました。再生して、各行の開始秒・±0.1秒・「今の位置」で修整してください。';
-    syncUI(); replan();
+    const lines = J.parseLyrics(S.project.lyrics).lines;
+    const anchors = $('timingMode').value === 'replace' ? {} : timingAnchors(lines);
+    if (lines.length && Object.keys(anchors).length === lines.length) {
+      $('timingStatus').textContent = 'すべての行が固定されています。配置を作り直すには「すべて配置し直す」を選択してください。';
+      return;
+    }
+    const spacing = $('timingSpacing').value || 'lyrics', snapStrength = Number($('timingSnap').value);
+    const times = J.autoLyricTimes(lines, audioLike(), { start, end, anchors, spacing, snapStrength, ignoreLrc: true });
+    const timing = timingWithTimes(lines.map((_, i) => times[i]), end, anchors);
+    Object.assign(timing, { spacing, snapStrength, mode: $('timingMode').value || 'keep' });
+    applyTiming(timing, '仮配置しました。再生して、各行の開始秒・±0.1秒・「今の位置」で修整してください。');
   } catch (e) { $('timingStatus').textContent = e.message; }
 }
 
 /* ---------------- tap sync ---------------- */
 function startTap() {
-  if (!S.plan.lines.length || S.exporting) return;
+  const current = effectiveTiming();
+  if (!current.lines.length || S.exporting) return;
+  // Lyrics may have changed while their debounced preview rebuild is pending.
+  replan();
   rememberTiming();
-  S.tap = { i: 0, times: {} };
+  const from = Math.max(0, Math.min(current.lines.length - 1, Number($('timingFrom').value) || 0));
+  S.tap = { i: from, from, count: 0, times: {}, earlier: current.starts.slice(0, from) };
   $('tapPanel').hidden = false; $('btnTap').setAttribute('aria-pressed', 'true');
-  seek(0); play(); updateTap();
+  seek(Math.max(0, current.starts[from] - 1)); play(); updateTap();
   $('tapBtn').focus();
 }
 function tapNow() {
   if (!S.tap) return;
-  const time = +(S.audio && S.playing ? AP.time() : S.t).toFixed(3);
-  if (time < 0 || (S.tap.i > 0 && time <= S.tap.times[S.tap.i - 1])) {
+  const time = +currentSongTime().toFixed(3);
+  const previous = S.tap.times[S.tap.i - 1] ?? S.tap.earlier.at(-1) ?? -1;
+  const end = S.project.timing.autoEnd ?? S.audio?.duration ?? Infinity;
+  if (time < 0 || time <= previous || time >= end) {
     $('timingStatus').textContent = '前の行より後の位置でタップしてください。'; return;
   }
   S.tap.times[S.tap.i] = time;
-  S.tap.i++;
+  S.tap.i++; S.tap.count++;
   if (S.tap.i >= S.plan.lines.length) stopTap(); else updateTap();
 }
 function stopTap() {
   const tap = S.tap;
   S.tap = null; $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false');
-  if (tap && tap.i) {
+  if (tap && tap.count) {
     try {
-      const lineTimes = Object.assign({}, S.project.timing.lineTimes, tap.times);
-      const lines = J.parseLyrics(S.project.lyrics).lines;
-      let timing = Object.assign({}, S.project.timing, { lineTimes, autoTimes: {} });
-      if (S.audio) {
-        const start = Math.min(timing.autoStart ?? 0, tap.times[0]);
-        const end = timing.autoEnd ?? S.audio.duration;
-        timing.autoTimes = J.autoLyricTimes(lines, audioLike(), { start, end, anchors: lineTimes });
-        timing.autoStart = start; timing.autoEnd = end;
-      } else {
-        const starts = J.computeTiming(Object.assign({}, S.project, { timing }), { lines }, null).starts;
-        if (starts.some((t, i) => !Number.isFinite(t) || t < 0 || (i && t <= starts[i - 1]))) {
-          throw new Error('残りの行の確定時刻と前後しています。先に手修整を解除してください。');
-        }
-      }
-      S.project.timing = timing;
-      $('timingStatus').textContent = `${tap.i}行のタップを反映しました。` + (S.audio && tap.i < lines.length ? '残りは確定時刻を保って仮配置しました。' : '');
+      const current = effectiveTiming(), lines = current.lines;
+      const anchors = Object.assign(timingAnchors(lines), tap.times);
+      tap.earlier.forEach((value, i) => { anchors[i] = value; });
+      const start = tap.from === 0 ? tap.times[0] : current.starts[0];
+      const end = S.project.timing.autoEnd ?? S.audio?.duration ?? current.ends.at(-1);
+      const audio = Object.assign({}, audioLike() || {}, { duration: S.audio?.duration ?? end });
+      const times = J.autoLyricTimes(lines, audio, allocationOptions(start, end, anchors));
+      S.project.timing = timingWithTimes(lines.map((_, i) => times[i]), end, anchors);
+      $('timingStatus').textContent = `${tap.from + 1}行目から${tap.count}行のタップを反映しました。` + (tap.i < lines.length ? '残りは確定時刻を保って仮配置しました。' : '');
       syncUI();
     } catch (e) {
       $('timingStatus').textContent = 'タップは反映せず、元のタイミングを保ちました。' + e.message;
@@ -929,13 +1049,19 @@ function syncUI() {
   $('lyrics').value = S.project.lyrics;
   $('bpm').value = S.project.timing.bpm > 0 ? S.project.timing.bpm : '';
   $('bpm').placeholder = S.audio ? `自動 ${S.audio.bpm}` : 'なし';
-  $('offset').value = S.project.timing.offset ?? 0.4;
+  const effectiveStart = effectiveTiming().starts[0] ?? S.project.timing.autoStart ?? S.project.timing.offset ?? 0;
+  $('offset').value = effectiveStart;
   $('lineScale').value = S.project.timing.lineScale ?? 1;
   $('snap').checked = !!S.project.timing.snap;
-  $('autoStart').value = S.project.timing.autoStart ?? 0;
+  $('autoStart').value = effectiveStart;
   $('autoEnd').value = S.project.timing.autoEnd ?? '';
   $('autoEnd').placeholder = S.audio ? S.audio.duration.toFixed(2) : '曲の終わり';
   $('btnAutoTiming').disabled = !S.audio;
+  $('timingMode').value = S.project.timing.mode || 'keep';
+  $('timingSpacing').value = S.project.timing.spacing || 'lyrics';
+  $('timingSnap').value = S.project.timing.snapStrength ?? 0.65;
+  $('timingSnapValue').textContent = Math.round(Number($('timingSnap').value) * 100) + '%';
+  $('playbackRate').value = String(S.previewRate || 1);
   $('moodLock').value = S.project.moodLock || '';
   renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid(); phSyncUI();
 }
@@ -948,16 +1074,36 @@ function bind() {
   $('songArtist').addEventListener('input', e => { S.project.artist = e.target.value; replanSoon(300); });
   $('btnSyntax').addEventListener('click', e => { const s = $('syntax'); s.hidden = !s.hidden; e.target.setAttribute('aria-expanded', String(!s.hidden)); });
   $('bpm').addEventListener('change', e => { S.project.timing.bpm = Math.max(0, parseFloat(e.target.value) || 0); replan(); });
-  $('offset').addEventListener('change', e => { S.project.timing.offset = Math.max(0, parseFloat(e.target.value) || 0); replan(); });
+  $('offset').addEventListener('change', e => changeTimingRange(e.target.value, $('autoEnd').value));
   $('lineScale').addEventListener('change', e => { S.project.timing.lineScale = J.clamp(parseFloat(e.target.value) || 1, 0.3, 4); replan(); });
   $('snap').addEventListener('change', e => { S.project.timing.snap = e.target.checked; replan(); });
   // 雰囲気ロック：固定すると、以後の「おまかせ」は常にこの雰囲気を使う
   $('moodLock').innerHTML = '<option value="">おまかせ（毎回変える）</option>' + Object.keys(J.MOODS).map(k => `<option value="${k}">${escapeHtml(J.MOODS[k].name)}</option>`).join('');
   $('moodLock').addEventListener('change', e => { S.project.moodLock = e.target.value || null; autosave(); });
-  $('btnResetTimes').addEventListener('click', () => { if (S.tap || S.exporting) return; rememberTiming(); S.project.timing.lineTimes = {}; replan(); });
+  $('btnResetTimes').addEventListener('click', () => {
+    if (!timingAvailable()) return;
+    const current = effectiveTiming();
+    if (!current.starts.length) return;
+    applyTiming(timingWithTimes(current.starts, current.ends.at(-1), {}), 'すべての固定を解除しました。仮配置し直すか、必要な行を固定してください。');
+  });
   $('btnAutoTiming').addEventListener('click', autoTiming);
-  $('btnAutoStart').addEventListener('click', () => { $('autoStart').value = S.t.toFixed(2); });
-  $('btnAutoEnd').addEventListener('click', () => { $('autoEnd').value = S.t.toFixed(2); });
+  $('autoStart').addEventListener('change', e => changeTimingRange(e.target.value, $('autoEnd').value));
+  $('autoEnd').addEventListener('change', e => changeTimingRange($('autoStart').value, e.target.value));
+  $('btnAutoStart').addEventListener('click', () => changeTimingRange(currentSongTime(), $('autoEnd').value));
+  $('btnAutoEnd').addEventListener('click', () => changeTimingRange($('autoStart').value, currentSongTime()));
+  $('timingMode').addEventListener('change', e => { S.project.timing.mode = e.target.value; autosave(); });
+  $('timingSpacing').addEventListener('change', e => { S.project.timing.spacing = e.target.value; autosave(); });
+  $('timingSnap').addEventListener('input', e => { S.project.timing.snapStrength = Number(e.target.value); $('timingSnapValue').textContent = Math.round(Number(e.target.value) * 100) + '%'; autosave(); });
+  $('btnShiftTiming').addEventListener('click', () => shiftTiming(Number($('timingShift').value)));
+  $('btnShiftNow').addEventListener('click', () => {
+    const from = Number($('timingFrom').value), starts = effectiveTiming().starts;
+    shiftTiming(currentSongTime() - starts[from]);
+  });
+  $('playbackRate').addEventListener('change', e => {
+    const position = currentSongTime(), rate = Number(e.target.value);
+    if (![1, 0.75, 0.5].includes(rate)) return;
+    S.previewRate = rate; seek(position);
+  });
   $('btnUndoTiming').addEventListener('click', () => {
     if (!timingUndo || S.exporting || S.tap) return;
     S.project.timing = timingUndo; timingUndo = null; $('btnUndoTiming').disabled = true;

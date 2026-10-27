@@ -51,7 +51,7 @@
         <div id="audioName" class="muted audio-name">曲なし（歌詞を入力してから曲を読み込むと、自動で仮配置します）</div>
         <div class="row">
           <label class="file" title="mp3 / wav / m4a など">曲を読み込む<input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"></label>
-          <button id="btnTap" title="曲を再生しながら各行の頭でタップ">タップで同期</button>
+          <button id="btnTap" title="選択した開始行の1秒前から再生し、各行の頭でタップ">選択行からタップ同期</button>
         </div>
         <div class="timing-guide">
           <p class="hint">① 歌詞と曲を読み込む → ② 自動で仮配置 → ③ 再生しながら行ごとに修整</p>
@@ -63,16 +63,33 @@
             <button id="btnAutoStart" class="ghost small">今の位置を歌い出しに</button>
             <button id="btnAutoEnd" class="ghost small">今の位置を歌い終わりに</button>
           </div>
+          <p class="hint">歌い出し・歌い終わりを変更すると、その場で配置全体を伸縮します。</p>
+          <div class="fields">
+            <label class="field">配置方法<select id="timingSpacing"><option value="lyrics">歌詞の長さに合わせる</option><option value="equal">行を均等に配置</option></select></label>
+            <label class="field">再配置する時<select id="timingMode"><option value="keep">合わせた行を保つ</option><option value="replace">すべて配置し直す</option></select></label>
+          </div>
+          <p class="hint">配置方法・寄せる強さは、下の「曲に合わせて仮配置」で適用します。</p>
+          <label class="timing-snap">拍・音の区切りに寄せる<input id="timingSnap" type="range" min="0" max="1" step="0.05" value="0.65"><output id="timingSnapValue">65%</output></label>
           <div class="row">
             <button id="btnAutoTiming" class="accent" disabled>曲に合わせて仮配置</button>
-            <button id="btnUndoTiming" class="ghost small" disabled>配置を元に戻す</button>
+            <button id="btnUndoTiming" class="ghost small" disabled>タイミングを1つ戻す</button>
           </div>
-          <p class="hint">拍・音量・歌詞の長さからの目安です。歌声の認識ではないため、前奏・間奏や歌い回しは手修整してください。再配置しても手修整とLRCの時刻は保ちます。</p>
+          <p class="hint">まず歌い出し・歌い終わりを指定して仮配置し、サビの頭など数行を「今に合わせて前後を再配置」で合わせると、その間を補間できます。音から歌詞を認識する機能ではありません。</p>
+          <details class="timing-adjust" open>
+            <summary>まとめてずらす・間奏を調整</summary>
+            <div class="fields">
+              <label class="field">開始行<select id="timingFrom" aria-label="調整する開始行"></select></label>
+              <label class="field">終了行<select id="timingTo" aria-label="調整する終了行"></select></label>
+              <label class="field">移動する秒数<input id="timingShift" type="number" step="0.1" value="0.5"></label>
+            </div>
+            <div class="row"><button id="btnShiftTiming">選択した行を移動</button><button id="btnShiftNow">選択の先頭を今に合わせる</button></div>
+            <p class="hint">＋で遅く、−で早くします。間奏の後がずれる場合は、その行から最後まで選ぶと行間を保って移動できます。歌詞を押すと開始行を選べます。</p>
+          </details>
           <p id="timingStatus" class="hint" role="status" aria-live="polite"></p>
         </div>
         <div class="fields pro-only">
           <label class="field">BPM<input id="bpm" type="number" min="0" max="300" step="0.1" placeholder="自動"></label>
-          <label class="field">開始(秒)<input id="offset" type="number" min="0" step="0.05"></label>
+          <label class="field">歌い出し(秒)<input id="offset" type="number" min="0" step="0.05"></label>
           <label class="field">行の長さ<input id="lineScale" type="number" min="0.4" max="3" step="0.05"></label>
         </div>
         <div class="row pro-only">
@@ -89,7 +106,7 @@
 
       <div class="sec">
         <div class="sec-h"><h2>行とカット</h2><span id="linesInfo" class="muted mono"></span></div>
-        <p class="hint">歌詞を押すとその行へ移動。開始秒、±0.1秒、または「今の位置」で調整できます。</p>
+        <p class="hint">歌詞を押すとその行へ移動・選択します。「今に合わせて前後を再配置」で大きなずれを直し、秒数や±0.1秒で仕上げられます。</p>
         <ol id="lineList"></ol>
       </div>
     </section>
@@ -99,6 +116,7 @@
       <div class="viewport" id="viewport"><canvas id="view" width="1280" height="720"></canvas><div id="viewMsg" class="overlay-msg" hidden></div><div id="toast" class="toast" role="status" aria-live="polite" hidden></div></div>
       <div class="transport">
         <button id="btnPlay" class="play" aria-label="再生">▶</button>
+        <label class="preview-speed">再生速度<select id="playbackRate" aria-label="確認用の再生速度"><option value="1">1×</option><option value="0.75">0.75×</option><option value="0.5">0.5×</option></select></label>
         <span id="timeNow" class="tc">00:00.00</span><span class="tc muted">/</span><span id="timeDur" class="tc muted">00:00.00</span>
         <input id="scrub" type="range" min="0" max="10000" value="0" aria-label="再生位置">
         <button id="btnLoop" class="ghost small" aria-pressed="true">ループ</button>
