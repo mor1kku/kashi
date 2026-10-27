@@ -268,6 +268,10 @@ button.omakase:disabled { box-shadow: none; }
 #downloadName { overflow-wrap: anywhere; }
 #downloadResult a { cursor: pointer; color: var(--cyan); }
 
+.storage-warning { margin: 10px 16px; padding: 12px; border: 1px solid var(--amber); border-radius: var(--r); background: var(--raised); }
+.storage-warning .row { flex-wrap: wrap; }
+.storage-warning a { color: var(--cyan); cursor: pointer; }
+
 </style>
 </head>
 <body>
@@ -288,6 +292,17 @@ button.omakase:disabled { box-shadow: none; }
       <button id="btnAE" title="After Effects パネル用の構成データを書き出す">AE用に書き出し</button>
     </div>
   </header>
+
+  <section id="storageWarning" class="storage-warning" aria-label="保存データの保護" hidden>
+    <strong>保存データを保護しています</strong>
+    <p id="storageWarningText" role="status" aria-live="polite"></p>
+    <div class="row">
+      <a id="storageBackupLink" class="file">元の保存データをダウンロード</a>
+      <button id="storageResume">元データを別に保管して保存を再開</button>
+      <button id="storageRetry" class="ghost">保存状態を再確認</button>
+    </div>
+    <p class="hint">保護中は編集内容を自動保存しません。「保存」で現在の編集をファイルに保存できます。元の保存データには破損した内容もそのまま含まれます。</p>
+  </section>
 
   <main class="work">
     <!-- ================= left: lyrics & timing ================= -->
@@ -13246,45 +13261,67 @@ const DB_NAME = 'jizura', STORE = 'photos';
 const LONG_SIDE = 3840, THUMB_SIDE = 240, MAX_BMP = 6;
 
 /* ---------------- IndexedDB（ダメならメモリに退避） ---------------- */
-let dbPromise = null, useMem = false;
+let dbPromise = null, fallbackNotified = false;
+// Only newly added records whose write failed live here. A failed write must
+// not hide photos that were successfully persisted earlier in this session.
 const memStore = new Map();
 function openDB() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('no-idb')); return; }
-    let req;
-    try { req = indexedDB.open(DB_NAME, 1); } catch (e) { reject(e); return; }
+    let req, failed = false;
+    const fail = error => { failed = true; reject(error); };
+    try { req = indexedDB.open(DB_NAME, 1); } catch (e) { fail(e); return; }
     req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }); };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('idb-open-failed'));
-  });
+    req.onsuccess = () => {
+      const db = req.result;
+      if (failed) { db.close(); return; }
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      db.onclose = () => { dbPromise = null; };
+      resolve(db);
+    };
+    req.onerror = () => fail(req.error || new Error('idb-open-failed'));
+    req.onblocked = () => fail(new Error('idb-open-blocked'));
+  }).catch(error => { dbPromise = null; throw error; }); // retry transient open failures
   return dbPromise;
 }
 function markMemFallback() {
-  if (useMem) return;
-  useMem = true;
-  J.photoNotify && J.photoNotify('この環境では写真をこのタブの間だけ保存します（プライベートブラウジング等でIndexedDBが使えません）');
+  if (fallbackNotified) return;
+  fallbackNotified = true;
+  J.photoNotify && J.photoNotify('追加した写真の一部をブラウザに保存できなかったため、このタブの間だけ保持します。以前に保存した写真は引き続き使えます。');
+}
+async function recordTransaction(mode, operation, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, mode);
+    let request, result;
+    const fail = () => reject(tx.error || (request && request.error) || new Error('idb-transaction-failed'));
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = fail;
+    tx.onabort = fail;
+    request = tx.objectStore(STORE)[operation](value);
+    request.onsuccess = () => { result = request.result; };
+    request.onerror = fail;
+    // A successful request is not a successful transaction: an abort can occur
+    // afterwards. In particular, don't treat an aborted read as a missing ID.
+  });
 }
 async function putRecord(rec) {
-  if (useMem) { memStore.set(rec.id, rec); return; }
   try {
-    const db = await openDB();
-    await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(rec); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    await recordTransaction('readwrite', 'put', rec);
+    memStore.delete(rec.id);
   } catch (e) { markMemFallback(); memStore.set(rec.id, rec); }
 }
 async function getRecord(id) {
-  if (useMem) return memStore.get(id) || null;
-  try {
-    const db = await openDB();
-    return await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readonly'); const rq = tx.objectStore(STORE).get(id); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error); });
-  } catch (e) { return memStore.get(id) || null; }
+  if (memStore.has(id)) return memStore.get(id);
+  const record = await recordTransaction('readonly', 'get', id);
+  return record || null; // null means a completed read confirmed absence
 }
 async function deleteRecord(id) {
-  if (useMem) { memStore.delete(id); return; }
-  try {
-    const db = await openDB();
-    await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).delete(id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
-  } catch (e) { memStore.delete(id); }
+  // IDs are generated for each import. Memory records never committed to disk,
+  // so they can be removed even while the database is unavailable.
+  if (memStore.has(id)) { memStore.delete(id); return; }
+  await recordTransaction('readwrite', 'delete', id);
 }
 
 /* ---------------- 取り込み：縮小 → JPEG化 → 保存 ---------------- */
@@ -13350,7 +13387,8 @@ function evictBitmap(id) {
 const thumbURLs = new Map();
 async function thumbURL(id) {
   if (thumbURLs.has(id)) return thumbURLs.get(id);
-  const rec = await getRecord(id);
+  let rec;
+  try { rec = await getRecord(id); } catch (e) { return null; }
   if (!rec || !rec.thumb) return null;
   const url = URL.createObjectURL(rec.thumb);
   thumbURLs.set(id, url);
@@ -13446,9 +13484,12 @@ J.photo = {
   thumbURL,
   // 保存済みプロジェクトのidのうち、IndexedDBに実体が無いものを取り除く
   filterExisting: async (ids) => {
-    const out = []; let missing = 0;
-    for (const id of ids || []) { if (await getRecord(id)) out.push(id); else missing++; }
-    return { ids: out, missing };
+    const out = []; let missing = 0, unavailable = 0;
+    for (const id of ids || []) {
+      try { if (await getRecord(id)) out.push(id); else missing++; }
+      catch (e) { out.push(id); unavailable++; } // unknown is not missing
+    }
+    return { ids: out, missing, unavailable };
   },
   // 時刻tの前後で必要なビットマップの読み込みを（待たずに）開始する
   prefetch: (plan, t) => {
@@ -13557,37 +13598,140 @@ function mergeProject(p) {
   o.photo = Object.assign(J.defaultProject().photo, (p && p.photo) || {});
   return o;
 }
-// 保存されたプロジェクトが参照している写真idのうち、IndexedDBに実体が無いものを取り除く
+// Only confirmed missing photos may be removed; failed reads retain their IDs.
 async function reconcilePhotos() {
-  const ids = S.project.photo.ids; if (!ids || !ids.length) return;
-  const { ids: kept, missing } = await J.photo.filterExisting(ids);
-  if (missing) { S.project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
+  const project = S.project, ids = project.photo.ids;
+  if (!ids || !ids.length) return;
+  const { ids: kept, missing, unavailable } = await J.photo.filterExisting(ids);
+  if (S.project !== project || project.photo.ids !== ids) return;
+  if (missing) { project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
+  if (unavailable) toast(`写真 ${unavailable}枚を読み出せませんでした。写真の登録は保持しています。ページを開き直すと再確認します。`);
+}
+const storageState = { blocked: false, records: [], detail: '', download: null, writeError: '' };
+function validStoredProject(p) {
+  const object = value => value && typeof value === 'object' && !Array.isArray(value);
+  if (!object(p) || typeof p.lyrics !== 'string') return false;
+  for (const key of ['fx', 'timing', 'enabled', 'overrides', 'colors', 'fonts', 'photo']) {
+    if (p[key] != null && !object(p[key])) return false;
+  }
+  if (p.photo && p.photo.ids != null && !Array.isArray(p.photo.ids)) return false;
+  if (p.userFonts != null && (!Array.isArray(p.userFonts) || p.userFonts.some(f => !object(f) || typeof f.key !== 'string' || typeof f.family !== 'string'))) return false;
+  return true;
+}
+function readStoredProjects() {
+  return [LS_KEY, RECOVERY_KEY].map(key => {
+    let raw;
+    try { raw = localStorage.getItem(key); }
+    catch (e) { return { key, raw: null, readable: false, valid: false }; }
+    if (raw === null) return { key, raw, readable: true, valid: true, project: null };
+    try {
+      const p = JSON.parse(raw);
+      if (!validStoredProject(p)) throw new Error('invalid project');
+      return { key, raw, readable: true, valid: true, project: mergeProject(p) };
+    } catch (e) { return { key, raw, readable: true, valid: false }; }
+  });
+}
+function storageBackupJSON() {
+  // Store original strings verbatim inside the bundle, including malformed JSON.
+  return JSON.stringify({ version: 1, savedAt: new Date().toISOString(), records: storageState.records.map(({ key, raw, readable }) => ({ key, raw, readable })) }, null, 2);
+}
+function protectStoredProjects(records, detail) {
+  storageState.blocked = true; storageState.records = records; storageState.detail = detail;
+  if (storageState.download) storageState.download.dispose();
+  storageState.download = null;
+  if (records.some(r => r.readable && r.raw !== null)) {
+    try { storageState.download = J.prepareDownload('jizura-original-storage.json', new Blob([storageBackupJSON()], { type: 'application/json' })); }
+    catch (e) {} // Storage protection must also work when downloads are unavailable.
+  }
+  refreshStorageWarning();
+}
+function refreshStorageWarning() {
+  const warning = $('storageWarning'); if (!warning) return;
+  warning.hidden = !storageState.blocked && !storageState.writeError;
+  const unreadable = storageState.records.some(r => !r.readable);
+  $('storageWarningText').textContent = storageState.blocked
+    ? storageState.detail + ' 元の保存データを守るため自動保存を停止しています。編集は続けられます。' +
+      (unreadable ? '保存領域を読めないため、状態を再確認するか編集データをファイルに保存してください。' : '元データをダウンロードできます。「元データを別に保管して保存を再開」を押すまで元の保存領域は更新しません。')
+    : storageState.writeError;
+  const link = $('storageBackupLink');
+  link.hidden = !storageState.download;
+  if (storageState.download) { link.href = storageState.download.url; link.download = storageState.download.filename; }
+  $('storageResume').disabled = !storageState.blocked || unreadable;
 }
 function loadLocal() {
-  for (const key of [LS_KEY, RECOVERY_KEY]) {
-    try {
-      const raw = localStorage.getItem(key); if (!raw) continue;
-      const p = JSON.parse(raw);
-      if (!p || typeof p !== 'object' || typeof p.lyrics !== 'string') continue;
-      return mergeProject(p);
-    } catch (e) {}
+  const records = readStoredProjects();
+  const chosen = records.find(r => r.project);
+  if (records.some(r => !r.readable || !r.valid)) {
+    protectStoredProjects(records, chosen ? '読み込める編集データを復元しましたが、別の保存データに問題があります。' : '保存済みの編集データを読み込めませんでした。仮の編集画面を開いています。');
   }
-  return mergeProject(null);
+  return chosen ? chosen.project : mergeProject(null);
+}
+function sameStoredRecords(a, b) {
+  return a.length === b.length && a.every((r, i) => r.key === b[i].key && r.readable && b[i].readable && r.raw === b[i].raw);
+}
+function resumeStorage() {
+  if (!storageState.blocked || storageState.records.some(r => !r.readable)) return false;
+  const current = readStoredProjects();
+  if (!sameStoredRecords(storageState.records, current)) {
+    protectStoredProjects(current, '保存データが別の画面で変更されたか、読み取りに失敗しました。内容を保護し直しました。再確認してから保存を再開してください。');
+    return false;
+  }
+  let quarantined = false;
+  try {
+    const backup = storageBackupJSON();
+    const quarantineKey = LS_KEY + '.quarantine.' + Date.now() + '.' + Math.random().toString(36).slice(2);
+    localStorage.setItem(quarantineKey, backup);
+    if (localStorage.getItem(quarantineKey) !== backup) throw new Error('backup verification failed');
+    quarantined = true;
+    // A second tab may have edited the originals while the backup was being written.
+    const latest = readStoredProjects();
+    if (!sameStoredRecords(storageState.records, latest)) {
+      protectStoredProjects(latest, '保存データが変更されたため、上書きを中止しました。内容を確認して再度操作してください。');
+      return false;
+    }
+    const json = JSON.stringify(S.project);
+    localStorage.setItem(LS_KEY, json);
+    localStorage.setItem(RECOVERY_KEY, json);
+    storageState.blocked = false; storageState.writeError = ''; storageState.detail = '';
+    refreshStorageWarning();
+    return true;
+  } catch (e) {
+    storageState.detail = quarantined
+      ? '元データを別の保存領域に保管しましたが、編集内容の保存に失敗しました。自動保存は停止したままです。'
+      : '元データを別に保管できなかったため、保存の再開を中止しました。元データをダウンロードし、編集内容もファイルに保存してください。';
+    refreshStorageWarning();
+    return false;
+  }
+}
+function bindStorageWarning() {
+  $('storageResume').addEventListener('click', resumeStorage);
+  $('storageRetry').addEventListener('click', () => {
+    if (storageState.blocked) protectStoredProjects(readStoredProjects(), '保存状態を再確認しました。現在の編集内容で置き換える前に、元データを別に保管してください。');
+    else saveNow();
+  });
+  refreshStorageWarning();
 }
 let saveTimer = 0;
 function saveNow(recovery = false) {
   clearTimeout(saveTimer);
-  const json = JSON.stringify(S.project);
+  if (storageState.blocked) { refreshStorageWarning(); return false; }
   try {
+    const json = JSON.stringify(S.project);
     localStorage.setItem(LS_KEY, json);
     if (recovery) localStorage.setItem(RECOVERY_KEY, json);
+    storageState.writeError = ''; refreshStorageWarning();
     return true;
   } catch (e) {
-    toast('ブラウザに編集を保存できません。「編集データを保存」でバックアップしてください。');
+    storageState.writeError = 'ブラウザに編集を保存できません。「編集データを保存」でファイルにバックアップしてください。保存状態の再確認で再試行できます。';
+    refreshStorageWarning();
     return false;
   }
 }
-function autosave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveNow(), 700); }
+function autosave() {
+  clearTimeout(saveTimer);
+  if (storageState.blocked) { refreshStorageWarning(); return; }
+  saveTimer = setTimeout(() => saveNow(), 700);
+}
 let recoveryDownload = null;
 function prepareRecovery() {
   saveNow(true);
@@ -14033,9 +14177,11 @@ function renderPhotoGrid() {
     grid.appendChild(div);
     J.photo.thumbURL(id).then(url => { if (url) div.querySelector('img').src = url; });
     div.querySelector('.ph-x').addEventListener('click', async () => {
-      await J.photo.remove(id);
-      S.project.photo.ids = S.project.photo.ids.filter(x => x !== id);
-      phSyncUI(); photoChanged();
+      try {
+        await J.photo.remove(id);
+        S.project.photo.ids = S.project.photo.ids.filter(x => x !== id);
+        phSyncUI(); photoChanged();
+      } catch (e) { toast('写真を削除できませんでした。登録を保持しています。もう一度お試しください。'); }
     });
     div.querySelector('.ph-mv.l button').addEventListener('click', () => movePhoto(i, -1));
     div.querySelector('.ph-mv.r button').addEventListener('click', () => movePhoto(i, 1));
@@ -14347,6 +14493,7 @@ function syncUI() {
 
 /* ---------------- wiring ---------------- */
 function bind() {
+  bindStorageWarning();
   $('lyrics').addEventListener('input', e => updateLyrics(e.target.value));
   $('songTitle').addEventListener('input', e => { S.project.title = e.target.value; replanSoon(300); });
   $('songArtist').addEventListener('input', e => { S.project.artist = e.target.value; replanSoon(300); });
@@ -14493,9 +14640,11 @@ function bind() {
   $('phClearAll').addEventListener('click', async () => {
     if (!S.project.photo.ids.length) return;
     if (!confirm('写真をすべて削除しますか？')) return;
-    await J.photo.removeAll(S.project.photo.ids);
-    S.project.photo.ids = [];
-    phSyncUI(); photoChanged();
+    try {
+      await J.photo.removeAll(S.project.photo.ids);
+      S.project.photo.ids = [];
+      phSyncUI(); photoChanged();
+    } catch (e) { toast('一部の写真を削除できませんでした。もう一度お試しください。'); }
   });
   ['dragover', 'drop'].forEach(evt => $('app').addEventListener(evt, e => {
     if (e.dataTransfer && [...(e.dataTransfer.items || [])].some(it => it.kind === 'file')) e.preventDefault();

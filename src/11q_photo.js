@@ -9,45 +9,67 @@ const DB_NAME = 'jizura', STORE = 'photos';
 const LONG_SIDE = 3840, THUMB_SIDE = 240, MAX_BMP = 6;
 
 /* ---------------- IndexedDB（ダメならメモリに退避） ---------------- */
-let dbPromise = null, useMem = false;
+let dbPromise = null, fallbackNotified = false;
+// Only newly added records whose write failed live here. A failed write must
+// not hide photos that were successfully persisted earlier in this session.
 const memStore = new Map();
 function openDB() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('no-idb')); return; }
-    let req;
-    try { req = indexedDB.open(DB_NAME, 1); } catch (e) { reject(e); return; }
+    let req, failed = false;
+    const fail = error => { failed = true; reject(error); };
+    try { req = indexedDB.open(DB_NAME, 1); } catch (e) { fail(e); return; }
     req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }); };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('idb-open-failed'));
-  });
+    req.onsuccess = () => {
+      const db = req.result;
+      if (failed) { db.close(); return; }
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      db.onclose = () => { dbPromise = null; };
+      resolve(db);
+    };
+    req.onerror = () => fail(req.error || new Error('idb-open-failed'));
+    req.onblocked = () => fail(new Error('idb-open-blocked'));
+  }).catch(error => { dbPromise = null; throw error; }); // retry transient open failures
   return dbPromise;
 }
 function markMemFallback() {
-  if (useMem) return;
-  useMem = true;
-  J.photoNotify && J.photoNotify('この環境では写真をこのタブの間だけ保存します（プライベートブラウジング等でIndexedDBが使えません）');
+  if (fallbackNotified) return;
+  fallbackNotified = true;
+  J.photoNotify && J.photoNotify('追加した写真の一部をブラウザに保存できなかったため、このタブの間だけ保持します。以前に保存した写真は引き続き使えます。');
+}
+async function recordTransaction(mode, operation, value) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, mode);
+    let request, result;
+    const fail = () => reject(tx.error || (request && request.error) || new Error('idb-transaction-failed'));
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = fail;
+    tx.onabort = fail;
+    request = tx.objectStore(STORE)[operation](value);
+    request.onsuccess = () => { result = request.result; };
+    request.onerror = fail;
+    // A successful request is not a successful transaction: an abort can occur
+    // afterwards. In particular, don't treat an aborted read as a missing ID.
+  });
 }
 async function putRecord(rec) {
-  if (useMem) { memStore.set(rec.id, rec); return; }
   try {
-    const db = await openDB();
-    await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(rec); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    await recordTransaction('readwrite', 'put', rec);
+    memStore.delete(rec.id);
   } catch (e) { markMemFallback(); memStore.set(rec.id, rec); }
 }
 async function getRecord(id) {
-  if (useMem) return memStore.get(id) || null;
-  try {
-    const db = await openDB();
-    return await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readonly'); const rq = tx.objectStore(STORE).get(id); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error); });
-  } catch (e) { return memStore.get(id) || null; }
+  if (memStore.has(id)) return memStore.get(id);
+  const record = await recordTransaction('readonly', 'get', id);
+  return record || null; // null means a completed read confirmed absence
 }
 async function deleteRecord(id) {
-  if (useMem) { memStore.delete(id); return; }
-  try {
-    const db = await openDB();
-    await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).delete(id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
-  } catch (e) { memStore.delete(id); }
+  // IDs are generated for each import. Memory records never committed to disk,
+  // so they can be removed even while the database is unavailable.
+  if (memStore.has(id)) { memStore.delete(id); return; }
+  await recordTransaction('readwrite', 'delete', id);
 }
 
 /* ---------------- 取り込み：縮小 → JPEG化 → 保存 ---------------- */
@@ -113,7 +135,8 @@ function evictBitmap(id) {
 const thumbURLs = new Map();
 async function thumbURL(id) {
   if (thumbURLs.has(id)) return thumbURLs.get(id);
-  const rec = await getRecord(id);
+  let rec;
+  try { rec = await getRecord(id); } catch (e) { return null; }
   if (!rec || !rec.thumb) return null;
   const url = URL.createObjectURL(rec.thumb);
   thumbURLs.set(id, url);
@@ -209,9 +232,12 @@ J.photo = {
   thumbURL,
   // 保存済みプロジェクトのidのうち、IndexedDBに実体が無いものを取り除く
   filterExisting: async (ids) => {
-    const out = []; let missing = 0;
-    for (const id of ids || []) { if (await getRecord(id)) out.push(id); else missing++; }
-    return { ids: out, missing };
+    const out = []; let missing = 0, unavailable = 0;
+    for (const id of ids || []) {
+      try { if (await getRecord(id)) out.push(id); else missing++; }
+      catch (e) { out.push(id); unavailable++; } // unknown is not missing
+    }
+    return { ids: out, missing, unavailable };
   },
   // 時刻tの前後で必要なビットマップの読み込みを（待たずに）開始する
   prefetch: (plan, t) => {
@@ -269,3 +295,4 @@ J.photoNotify = null;
 // ビットマップの読み込み完了を知らせるフック（12_ui.js側で再描画要求をつなぐ）
 J.photoOnLoad = null;
 })();
+
