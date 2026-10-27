@@ -10,13 +10,13 @@ function setup(options = {}) {
   class Encoder {
     static async isConfigSupported(config) { return { supported: true, config }; }
     constructor(callbacks) { this.callbacks = callbacks; this.state = 'unconfigured'; this.encodeQueueSize = 0; state.encoders.push(this); }
-    configure() { if (options.configureError) throw new Error('configure failed'); this.state = 'configured'; }
+    configure(config) { this.config = config; if (options.configureError) throw new Error('configure failed'); this.state = 'configured'; }
     encode(frame) {
       if (options.encodeError) throw new Error('encode failed');
       if (options.stall || options.asyncError) {
         this.encodeQueueSize = 5;
         if (options.asyncError) setTimeout(() => this.callbacks.error(new Error('encoder failed')), 0);
-      } else this.callbacks.output({ byteLength: options.chunkBytes || 1 }, {});
+      } else this.callbacks.output({ byteLength: options.chunkBytes || 1 }, this.config?.codec === 'mp4a.40.2' ? options.audioMetadata || {} : {});
     }
     async flush() { if (options.flushError) this.callbacks.error(new Error('flush failed')); }
     close() { this.state = 'closed'; }
@@ -34,7 +34,7 @@ function setup(options = {}) {
     Mp4Muxer: { ArrayBufferTarget: class { constructor() { this.buffer = new ArrayBuffer(8); } }, Muxer: class {
       constructor(config) { state.muxConfig = config; }
       addVideoChunk() { if (options.muxError) throw new Error('mux failed'); }
-      addAudioChunk() { if (options.audioMuxError) throw new Error('audio mux failed'); }
+      addAudioChunk(chunk, metadata) { state.audioMetadata = metadata; if (options.audioMuxError) throw new Error('audio mux failed'); }
       addAudioChunkRaw(data) { state.rawAudioBytes = (state.rawAudioBytes || 0) + data.byteLength; }
       finalize() { state.finalized = true; }
     } }
@@ -196,4 +196,47 @@ for (const softwareAudio of [false,true]) test('no audio packets prevents a comp
   const {J,state}=setup({audioSupport:true,aacSupport:!softwareAudio,softwareAudio,noAudioChunks:true});
   await assert.rejects(J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:2,duration:1}}}),/音声を書き出せなかった/);
   assert.equal(state.finalized,false); if(softwareAudio) assert.equal(state.softwareClosed,true); cleaned(J,state);
+});
+
+// Exact CoreAudio ES_Descriptor reported in WebKit bug302253 (48kHz mono).
+const safariCookie = [3,128,128,128,34,0,0,0,4,128,128,128,20,64,20,0,24,0,0,0,0,0,0,0,0,0,5,128,128,128,2,17,136,6,128,128,128,1,2];
+function meta(description) { return {decoderConfig:{codec:'mp4a.40.2',sampleRate:48000,numberOfChannels:1,description}}; }
+test('Safari ES descriptor is reduced to the actual AAC AudioSpecificConfig',()=>{
+  const {J}=setup();
+  const raw=meta(new Uint8Array(safariCookie));
+  assert.deepEqual(Array.from(J.normalizeAacMetadata(raw,48000,1).decoderConfig.description),[17,136]);
+  assert.equal(raw.decoderConfig.description.length,39,'do not mutate the encoder metadata');
+});
+test('valid ASC including extensions passes through, respecting typed-array offsets',()=>{
+  const {J}=setup();
+  for (const bytes of [[17,136],[17,144,86,229,0]]) {
+    const input=meta(Uint8Array.from([99,...bytes,99]).subarray(1,1+bytes.length));
+    assert.equal(J.normalizeAacMetadata(input,48000,bytes[1]===136?1:2),input);
+  }
+  const wrapped=Uint8Array.from([99,...safariCookie,99]).subarray(1,40);
+  assert.deepEqual(Array.from(J.normalizeAacMetadata(meta(wrapped),48000,1).decoderConfig.description),[17,136]);
+});
+test('invalid, truncated, mismatched and oversized AAC descriptors are rejected',()=>{
+  const {J}=setup();
+  for(const bytes of [[0,0],[],safariCookie.slice(0,-1),[3,255,255,255,255],safariCookie.slice(0,30),[17,144]])
+    assert.throws(()=>J.normalizeAacMetadata(meta(new Uint8Array(bytes)),48000,1),/音声の設定情報/);
+  assert.equal(J.normalizeAacMetadata(undefined,48000,1),undefined);
+});
+test('native Safari output is normalized before the MP4 muxer receives it',async()=>{
+  const {J,state}=setup({audioSupport:true,audioMetadata:meta(new Uint8Array(safariCookie))});
+  await J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:1,duration:1}}});
+  assert.deepEqual(Array.from(state.audioMetadata.decoderConfig.description),[17,136]);
+});
+test('invalid native AAC metadata cannot produce a completed MP4',async()=>{
+  const {J,state}=setup({audioSupport:true,audioMetadata:meta(new Uint8Array([0,0]))});
+  await assert.rejects(J.exportMP4({...args,project:{includeAudio:true},audio:{buffer:{numberOfChannels:1,duration:1}}}),/音声の設定情報/);
+  assert.equal(state.finalized,false); cleaned(J,state);
+});
+test('short sound test uses the same source offset for audio and video',async()=>{
+  const {J,state}=setup({audioSupport:true}); const times=[]; J.Renderer=class { frame(ctx,plan,t){times.push(t);} };
+  await J.exportMP4({...args,plan:{...args.plan,duration:7,fps:2},project:{includeAudio:true},audio:{buffer:{numberOfChannels:1,duration:7}},range:{start:2,duration:5}});
+  assert.equal(times[0],2);assert.equal(times.at(-1),6.5);assert.equal(times.length,10);
+  assert.deepEqual(state.resampleWindows,[{length:240000,offset:2}]);
+  assert.equal(state.audioData[0].timestamp,0);
+  await assert.rejects(J.exportMP4({...args,range:{start:1,duration:5}}),/書き出す区間/);
 });
