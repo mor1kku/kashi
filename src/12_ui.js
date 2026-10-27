@@ -47,37 +47,140 @@ function mergeProject(p) {
   o.photo = Object.assign(J.defaultProject().photo, (p && p.photo) || {});
   return o;
 }
-// 保存されたプロジェクトが参照している写真idのうち、IndexedDBに実体が無いものを取り除く
+// Only confirmed missing photos may be removed; failed reads retain their IDs.
 async function reconcilePhotos() {
-  const ids = S.project.photo.ids; if (!ids || !ids.length) return;
-  const { ids: kept, missing } = await J.photo.filterExisting(ids);
-  if (missing) { S.project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
+  const project = S.project, ids = project.photo.ids;
+  if (!ids || !ids.length) return;
+  const { ids: kept, missing, unavailable } = await J.photo.filterExisting(ids);
+  if (S.project !== project || project.photo.ids !== ids) return;
+  if (missing) { project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
+  if (unavailable) toast(`写真 ${unavailable}枚を読み出せませんでした。写真の登録は保持しています。ページを開き直すと再確認します。`);
+}
+const storageState = { blocked: false, records: [], detail: '', download: null, writeError: '' };
+function validStoredProject(p) {
+  const object = value => value && typeof value === 'object' && !Array.isArray(value);
+  if (!object(p) || typeof p.lyrics !== 'string') return false;
+  for (const key of ['fx', 'timing', 'enabled', 'overrides', 'colors', 'fonts', 'photo']) {
+    if (p[key] != null && !object(p[key])) return false;
+  }
+  if (p.photo && p.photo.ids != null && !Array.isArray(p.photo.ids)) return false;
+  if (p.userFonts != null && (!Array.isArray(p.userFonts) || p.userFonts.some(f => !object(f) || typeof f.key !== 'string' || typeof f.family !== 'string'))) return false;
+  return true;
+}
+function readStoredProjects() {
+  return [LS_KEY, RECOVERY_KEY].map(key => {
+    let raw;
+    try { raw = localStorage.getItem(key); }
+    catch (e) { return { key, raw: null, readable: false, valid: false }; }
+    if (raw === null) return { key, raw, readable: true, valid: true, project: null };
+    try {
+      const p = JSON.parse(raw);
+      if (!validStoredProject(p)) throw new Error('invalid project');
+      return { key, raw, readable: true, valid: true, project: mergeProject(p) };
+    } catch (e) { return { key, raw, readable: true, valid: false }; }
+  });
+}
+function storageBackupJSON() {
+  // Store original strings verbatim inside the bundle, including malformed JSON.
+  return JSON.stringify({ version: 1, savedAt: new Date().toISOString(), records: storageState.records.map(({ key, raw, readable }) => ({ key, raw, readable })) }, null, 2);
+}
+function protectStoredProjects(records, detail) {
+  storageState.blocked = true; storageState.records = records; storageState.detail = detail;
+  if (storageState.download) storageState.download.dispose();
+  storageState.download = null;
+  if (records.some(r => r.readable && r.raw !== null)) {
+    try { storageState.download = J.prepareDownload('jizura-original-storage.json', new Blob([storageBackupJSON()], { type: 'application/json' })); }
+    catch (e) {} // Storage protection must also work when downloads are unavailable.
+  }
+  refreshStorageWarning();
+}
+function refreshStorageWarning() {
+  const warning = $('storageWarning'); if (!warning) return;
+  warning.hidden = !storageState.blocked && !storageState.writeError;
+  const unreadable = storageState.records.some(r => !r.readable);
+  $('storageWarningText').textContent = storageState.blocked
+    ? storageState.detail + ' 元の保存データを守るため自動保存を停止しています。編集は続けられます。' +
+      (unreadable ? '保存領域を読めないため、状態を再確認するか編集データをファイルに保存してください。' : '元データをダウンロードできます。「元データを別に保管して保存を再開」を押すまで元の保存領域は更新しません。')
+    : storageState.writeError;
+  const link = $('storageBackupLink');
+  link.hidden = !storageState.download;
+  if (storageState.download) { link.href = storageState.download.url; link.download = storageState.download.filename; }
+  $('storageResume').disabled = !storageState.blocked || unreadable;
 }
 function loadLocal() {
-  for (const key of [LS_KEY, RECOVERY_KEY]) {
-    try {
-      const raw = localStorage.getItem(key); if (!raw) continue;
-      const p = JSON.parse(raw);
-      if (!p || typeof p !== 'object' || typeof p.lyrics !== 'string') continue;
-      return mergeProject(p);
-    } catch (e) {}
+  const records = readStoredProjects();
+  const chosen = records.find(r => r.project);
+  if (records.some(r => !r.readable || !r.valid)) {
+    protectStoredProjects(records, chosen ? '読み込める編集データを復元しましたが、別の保存データに問題があります。' : '保存済みの編集データを読み込めませんでした。仮の編集画面を開いています。');
   }
-  return mergeProject(null);
+  return chosen ? chosen.project : mergeProject(null);
+}
+function sameStoredRecords(a, b) {
+  return a.length === b.length && a.every((r, i) => r.key === b[i].key && r.readable && b[i].readable && r.raw === b[i].raw);
+}
+function resumeStorage() {
+  if (!storageState.blocked || storageState.records.some(r => !r.readable)) return false;
+  const current = readStoredProjects();
+  if (!sameStoredRecords(storageState.records, current)) {
+    protectStoredProjects(current, '保存データが別の画面で変更されたか、読み取りに失敗しました。内容を保護し直しました。再確認してから保存を再開してください。');
+    return false;
+  }
+  let quarantined = false;
+  try {
+    const backup = storageBackupJSON();
+    const quarantineKey = LS_KEY + '.quarantine.' + Date.now() + '.' + Math.random().toString(36).slice(2);
+    localStorage.setItem(quarantineKey, backup);
+    if (localStorage.getItem(quarantineKey) !== backup) throw new Error('backup verification failed');
+    quarantined = true;
+    // A second tab may have edited the originals while the backup was being written.
+    const latest = readStoredProjects();
+    if (!sameStoredRecords(storageState.records, latest)) {
+      protectStoredProjects(latest, '保存データが変更されたため、上書きを中止しました。内容を確認して再度操作してください。');
+      return false;
+    }
+    const json = JSON.stringify(S.project);
+    localStorage.setItem(LS_KEY, json);
+    localStorage.setItem(RECOVERY_KEY, json);
+    storageState.blocked = false; storageState.writeError = ''; storageState.detail = '';
+    refreshStorageWarning();
+    return true;
+  } catch (e) {
+    storageState.detail = quarantined
+      ? '元データを別の保存領域に保管しましたが、編集内容の保存に失敗しました。自動保存は停止したままです。'
+      : '元データを別に保管できなかったため、保存の再開を中止しました。元データをダウンロードし、編集内容もファイルに保存してください。';
+    refreshStorageWarning();
+    return false;
+  }
+}
+function bindStorageWarning() {
+  $('storageResume').addEventListener('click', resumeStorage);
+  $('storageRetry').addEventListener('click', () => {
+    if (storageState.blocked) protectStoredProjects(readStoredProjects(), '保存状態を再確認しました。現在の編集内容で置き換える前に、元データを別に保管してください。');
+    else saveNow();
+  });
+  refreshStorageWarning();
 }
 let saveTimer = 0;
 function saveNow(recovery = false) {
   clearTimeout(saveTimer);
-  const json = JSON.stringify(S.project);
+  if (storageState.blocked) { refreshStorageWarning(); return false; }
   try {
+    const json = JSON.stringify(S.project);
     localStorage.setItem(LS_KEY, json);
     if (recovery) localStorage.setItem(RECOVERY_KEY, json);
+    storageState.writeError = ''; refreshStorageWarning();
     return true;
   } catch (e) {
-    toast('ブラウザに編集を保存できません。「編集データを保存」でバックアップしてください。');
+    storageState.writeError = 'ブラウザに編集を保存できません。「編集データを保存」でファイルにバックアップしてください。保存状態の再確認で再試行できます。';
+    refreshStorageWarning();
     return false;
   }
 }
-function autosave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveNow(), 700); }
+function autosave() {
+  clearTimeout(saveTimer);
+  if (storageState.blocked) { refreshStorageWarning(); return; }
+  saveTimer = setTimeout(() => saveNow(), 700);
+}
 let recoveryDownload = null;
 function prepareRecovery() {
   saveNow(true);
@@ -523,9 +626,11 @@ function renderPhotoGrid() {
     grid.appendChild(div);
     J.photo.thumbURL(id).then(url => { if (url) div.querySelector('img').src = url; });
     div.querySelector('.ph-x').addEventListener('click', async () => {
-      await J.photo.remove(id);
-      S.project.photo.ids = S.project.photo.ids.filter(x => x !== id);
-      phSyncUI(); photoChanged();
+      try {
+        await J.photo.remove(id);
+        S.project.photo.ids = S.project.photo.ids.filter(x => x !== id);
+        phSyncUI(); photoChanged();
+      } catch (e) { toast('写真を削除できませんでした。登録を保持しています。もう一度お試しください。'); }
     });
     div.querySelector('.ph-mv.l button').addEventListener('click', () => movePhoto(i, -1));
     div.querySelector('.ph-mv.r button').addEventListener('click', () => movePhoto(i, 1));
@@ -837,6 +942,7 @@ function syncUI() {
 
 /* ---------------- wiring ---------------- */
 function bind() {
+  bindStorageWarning();
   $('lyrics').addEventListener('input', e => updateLyrics(e.target.value));
   $('songTitle').addEventListener('input', e => { S.project.title = e.target.value; replanSoon(300); });
   $('songArtist').addEventListener('input', e => { S.project.artist = e.target.value; replanSoon(300); });
@@ -983,9 +1089,11 @@ function bind() {
   $('phClearAll').addEventListener('click', async () => {
     if (!S.project.photo.ids.length) return;
     if (!confirm('写真をすべて削除しますか？')) return;
-    await J.photo.removeAll(S.project.photo.ids);
-    S.project.photo.ids = [];
-    phSyncUI(); photoChanged();
+    try {
+      await J.photo.removeAll(S.project.photo.ids);
+      S.project.photo.ids = [];
+      phSyncUI(); photoChanged();
+    } catch (e) { toast('一部の写真を削除できませんでした。もう一度お試しください。'); }
   });
   ['dragover', 'drop'].forEach(evt => $('app').addEventListener(evt, e => {
     if (e.dataTransfer && [...(e.dataTransfer.items || [])].some(it => it.kind === 'file')) e.preventDefault();

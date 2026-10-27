@@ -16,6 +16,17 @@
     </div>
   </header>
 
+  <section id="storageWarning" class="storage-warning" aria-label="保存データの保護" hidden>
+    <strong>保存データを保護しています</strong>
+    <p id="storageWarningText" role="status" aria-live="polite"></p>
+    <div class="row">
+      <a id="storageBackupLink" class="file">元の保存データをダウンロード</a>
+      <button id="storageResume">元データを別に保管して保存を再開</button>
+      <button id="storageRetry" class="ghost">保存状態を再確認</button>
+    </div>
+    <p class="hint">保護中は編集内容を自動保存しません。「保存」で現在の編集をファイルに保存できます。元の保存データには破損した内容もそのまま含まれます。</p>
+  </section>
+
   <main class="work">
     <!-- ================= left: lyrics & timing ================= -->
     <section class="col col-left" aria-label="歌詞とタイミング">
