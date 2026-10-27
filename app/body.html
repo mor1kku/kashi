@@ -84,6 +84,20 @@
             </div>
             <div class="row"><button id="btnShiftTiming">選択した行を移動</button><button id="btnShiftNow">選択の先頭を今に合わせる</button></div>
             <p class="hint">＋で遅く、−で早くします。間奏の後がずれる場合は、その行から最後まで選ぶと行間を保って移動できます。歌詞を押すと開始行を選べます。</p>
+            <h3>選択した行の表示時間・速さ</h3>
+            <label class="row"><input id="timingFollow" type="checkbox" checked> 後ろの行も移動して間隔を保つ</label>
+            <div class="fields">
+              <label class="field">表示する秒数<input id="timingTargetDuration" type="number" min="0.01" step="0.1" value="4"></label>
+              <label class="field">表示速度（倍）<input id="timingSpeed" type="number" min="0.1" max="8" step="0.1" value="1.2"></label>
+            </div>
+            <div class="row"><button id="btnStretchSeconds">選択を指定秒数にする</button><button id="btnStretchSpeed">選択の表示速度を変える</button></div>
+            <div class="fields">
+              <label class="field">小節数<input id="timingBars" type="number" min="0.25" step="0.25" value="2"></label>
+              <label class="field">1小節の拍数<select id="timingBeatsPerBar"><option value="4">4拍</option><option value="3">3拍</option><option value="6">6拍</option></select></label>
+              <label class="field">小節換算BPM<input id="timingDurationBpm" type="number" min="1" max="400" step="0.1" placeholder="曲のBPM"></label>
+            </div>
+            <div class="row"><button id="btnStretchBars">選択を指定小節数にする</button></div>
+            <p class="hint">選択の先頭から最後の表示終了までを、間奏も含めて伸縮します。速度2倍なら表示時間は半分です。曲の再生・書き出し速度は変わりません。</p>
           </details>
           <p id="timingStatus" class="hint" role="status" aria-live="polite"></p>
         </div>

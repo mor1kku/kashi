@@ -57,6 +57,9 @@ function reset() {
   el('timingFrom').value = '0'; el('timingTo').value = '2';
   el('timingShift').value = '0.5'; el('timingSpacing').value = 'lyrics';
   el('timingSnap').value = '0.65'; el('timingMode').value = 'keep';
+  el('timingFollow').checked = false;
+  el('timingBars').value = '1'; el('timingBeatsPerBar').value = '4';
+  el('timingDurationBpm').value = ''; el('timingSpeed').value = '1';
 }
 
 // A newly inserted row must not inherit the old row's manual correction.
@@ -326,4 +329,118 @@ assert.equal(audioClock.player.time(), 12, 'restarting at a different preview ra
 audioClock.player.ctx.currentTime += 4;
 assert.equal(audioClock.player.time(), 15);
 
-console.log('ui_timing_test: lyric edits, affine ranges, bulk shifts, anchor reallocation, replace/keep, partial taps, preview clock and atomic rollback passed');
+const actualEnds = () => Array.from(context.effectiveTiming().ends);
+function gapped() {
+  reset();
+  Object.assign(context.S.project.timing, { lineEnds: { 0: 4, 1: 14, 2: 24 }, autoEnd: 24 });
+  context.S.audio.bpm = 120;
+  context.replan(); context.syncUI();
+}
+
+// Per-row end and duration edits affect that row alone, preserving real gaps.
+gapped();
+context.setLineEnd(0, 3);
+assert.deepEqual(actualStarts(), [0, 10, 20]);
+assert.deepEqual(actualEnds(), [3, 14, 24]);
+context.setLineDuration(1, 6);
+assert.deepEqual(actualStarts(), [0, 10, 20]);
+assert.deepEqual(actualEnds(), [3, 16, 24]);
+const beforeBadDuration = JSON.stringify(context.S.project.timing);
+for (const duration of [-1, 0, Infinity, NaN, 11]) {
+  context.setLineDuration(1, duration);
+  assert.equal(JSON.stringify(context.S.project.timing), beforeBadDuration, `invalid duration ${duration} must be atomic`);
+}
+context.setLineEnd(2, 31);
+assert.equal(JSON.stringify(context.S.project.timing), beforeBadDuration, 'row end cannot exceed the song');
+context.setLineEnd(1, 20);
+assert.equal(actualEnds()[1], 20, 'end exactly at the next row start is allowed');
+
+// Resizing a block scales its internal pauses and optionally moves later rows.
+gapped();
+const beforeStretch = JSON.stringify(context.S.project.timing);
+context.stretchTiming({ from: 0, to: 1, duration: 7, moveFollowing: false });
+assert.deepEqual(actualStarts(), [0, 5, 20]);
+assert.deepEqual(actualEnds(), [2, 7, 24]);
+assert.equal(JSON.stringify(vm.runInContext('timingUndo', context)), beforeStretch);
+assert.equal(context.S.project.timing.lineTimes[1], 5, 'existing manual anchor is transformed with its block');
+assert.equal(context.S.project.timing.lineTimes[2], undefined, 'resizing does not invent a manual anchor on an untouched row');
+
+gapped();
+context.stretchTiming({ from: 0, to: 1, duration: 7, moveFollowing: true });
+assert.deepEqual(actualStarts(), [0, 5, 13]);
+assert.deepEqual(actualEnds(), [2, 7, 17]);
+assert.equal(actualStarts()[2] - actualEnds()[1], 6, 'following shift preserves the original gap after the selection');
+
+gapped();
+context.stretchTiming({ from: 1, to: 1, duration: 8, moveFollowing: true });
+assert.deepEqual(actualStarts(), [0, 10, 24]);
+assert.deepEqual(actualEnds(), [4, 18, 28]);
+assert.equal(actualStarts()[1] - actualEnds()[0], 6, 'preceding gap stays unchanged');
+
+gapped();
+const beforeInvalidStretch = JSON.stringify(context.S.project.timing);
+for (const options of [
+  { from: 1, to: 1, duration: 15, moveFollowing: false },
+  { from: 1, to: 1, duration: 15, moveFollowing: true },
+  { from: 0, to: 1, duration: 0 },
+  { from: 0, to: 1, duration: -1 },
+  { from: 0, to: 1, duration: NaN },
+  { from: 0, to: 1, duration: Infinity },
+  { from: 2, to: 1, duration: 4 },
+]) {
+  context.stretchTiming(options);
+  assert.equal(JSON.stringify(context.S.project.timing), beforeInvalidStretch, 'invalid stretch cannot partially change starts, ends or anchors');
+}
+
+// Existing range and offset tools must carry explicit end times along too.
+gapped();
+context.changeTimingRange(2, 26);
+assert.deepEqual(actualStarts(), [2, 12, 22]);
+assert.deepEqual(actualEnds(), [6, 16, 26]);
+gapped();
+context.shiftTiming(2, 1, 2);
+assert.deepEqual(actualStarts(), [0, 12, 22]);
+assert.deepEqual(actualEnds(), [4, 16, 26]);
+
+// Visual timing speed changes never change the preview clock, song or export fps.
+gapped();
+context.S.previewRate = 0.5;
+context.S.project.fps = 60;
+const song = context.S.audio;
+const songBefore = JSON.stringify(song);
+context.applyLineSpeed(0, 2);
+assert.deepEqual(actualStarts(), [0, 10, 20]);
+assert.deepEqual(actualEnds(), [2, 14, 24]);
+assert.equal(context.S.previewRate, 0.5);
+assert.equal(context.S.project.fps, 60);
+assert.equal(context.S.audio, song);
+assert.equal(JSON.stringify(song), songBefore);
+gapped();
+elements.timingFollow.checked = true;
+context.applyLineSpeed(0, 2);
+assert.deepEqual(actualStarts(), [0, 8, 18]);
+assert.deepEqual(actualEnds(), [2, 12, 22]);
+
+// Bars use explicit BPM first, then project BPM, then analysed audio BPM.
+gapped();
+elements.timingFrom.value = '0'; elements.timingTo.value = '0';
+elements.timingBars.value = '2'; elements.timingBeatsPerBar.value = '3';
+elements.timingDurationBpm.value = '90';
+context.stretchByBars();
+assert.equal(actualEnds()[0], 4, '2 bars × 3 beats × 60/90 seconds');
+elements.timingDurationBpm.value = '';
+context.S.project.timing.bpm = 60;
+context.stretchByBars();
+assert.equal(actualEnds()[0], 6, 'project BPM supplies missing duration BPM');
+context.S.project.timing.bpm = 0;
+context.stretchByBars();
+assert.equal(actualEnds()[0], 3, 'analysed BPM is the final fallback');
+
+gapped();
+elements.timingFrom.value = '0'; elements.timingTo.value = '1';
+elements.timingSpeed.value = '2';
+context.stretchBySpeed();
+assert.deepEqual(actualStarts(), [0, 5, 20]);
+assert.deepEqual(actualEnds(), [2, 7, 24]);
+
+console.log('ui_timing_test: lyric edits, affine ranges, shifts, anchors, taps, visual durations/speed, bars, preview clock and atomic rollback passed');
