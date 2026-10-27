@@ -11,7 +11,7 @@
     </div>
     <div class="acts">
       <label class="file" title="保存したプロジェクト(.json)を開く">開く<input id="fileProject" type="file" accept=".json,application/json"></label>
-      <button id="btnSave" title="プロジェクトを .json で保存">保存</button>
+      <button id="btnSave" title="曲を含むプロジェクトを .json で保存">保存</button>
       <button id="btnAE" title="After Effects パネル用の構成データを書き出す">AE用に書き出し</button>
     </div>
   </header>
@@ -49,6 +49,8 @@
       <div class="sec">
         <div class="sec-h"><h2>曲とタイミング</h2></div>
         <div id="audioName" class="muted audio-name">曲なし（歌詞を入力してから曲を読み込むと、自動で仮配置します）</div>
+        <p id="audioStatus" class="hint" role="status" aria-live="polite"></p>
+        <label class="row easy-only"><input id="eAudio" type="checkbox" checked> 曲を動画に含める</label>
         <div class="row">
           <label class="file" title="mp3 / wav / m4a など">曲を読み込む<input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"></label>
           <button id="btnTap" title="選択した開始行の1秒前から再生し、各行の頭でタップ">選択行からタップ同期</button>
@@ -155,6 +157,7 @@
         <h3>書き出したファイル</h3>
         <p id="downloadName" class="hint"></p>
         <div class="row"><a id="downloadLink" class="file">ダウンロード</a><a id="downloadOpen" target="_blank" rel="noopener">ファイルを開く</a></div>
+        <p id="downloadAudioNote" class="hint"></p>
         <p class="hint">「ダウンロード」を押して保存してください。保存できない端末では「ファイルを開く」から保存・共有できます。次の書き出し開始まで再保存できます。</p>
       </div>
       <div id="easyPanel" class="easy" hidden>

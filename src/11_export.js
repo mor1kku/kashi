@@ -80,6 +80,7 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
   const [w, h] = J.outputSize(project);
   const fps = plan.fps;
   const bitrate = J.exportBitrate(w, h, fps, quality);
+  if (project.includeAudio !== false && !audio?.buffer) throw new Error('音声が未読込です。「曲を読み込む」でMP3などを指定してください。音声なしで作る場合は「曲を動画に含める」をOFFにしてください。');
   const wantsAudio = audio && audio.buffer && project.includeAudio !== false;
   if (!Number.isFinite(plan.duration) || plan.duration <= 0) throw new Error('動画の長さを確認してください。');
   if ((bitrate + (wantsAudio ? 192000 : 0)) * plan.duration / 8 * 1.05 > MP4_MAX_BYTES) throw memoryError();

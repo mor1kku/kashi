@@ -301,7 +301,7 @@ button.omakase:disabled { box-shadow: none; }
     </div>
     <div class="acts">
       <label class="file" title="保存したプロジェクト(.json)を開く">開く<input id="fileProject" type="file" accept=".json,application/json"></label>
-      <button id="btnSave" title="プロジェクトを .json で保存">保存</button>
+      <button id="btnSave" title="曲を含むプロジェクトを .json で保存">保存</button>
       <button id="btnAE" title="After Effects パネル用の構成データを書き出す">AE用に書き出し</button>
     </div>
   </header>
@@ -339,6 +339,8 @@ button.omakase:disabled { box-shadow: none; }
       <div class="sec">
         <div class="sec-h"><h2>曲とタイミング</h2></div>
         <div id="audioName" class="muted audio-name">曲なし（歌詞を入力してから曲を読み込むと、自動で仮配置します）</div>
+        <p id="audioStatus" class="hint" role="status" aria-live="polite"></p>
+        <label class="row easy-only"><input id="eAudio" type="checkbox" checked> 曲を動画に含める</label>
         <div class="row">
           <label class="file" title="mp3 / wav / m4a など">曲を読み込む<input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"></label>
           <button id="btnTap" title="選択した開始行の1秒前から再生し、各行の頭でタップ">選択行からタップ同期</button>
@@ -445,6 +447,7 @@ button.omakase:disabled { box-shadow: none; }
         <h3>書き出したファイル</h3>
         <p id="downloadName" class="hint"></p>
         <div class="row"><a id="downloadLink" class="file">ダウンロード</a><a id="downloadOpen" target="_blank" rel="noopener">ファイルを開く</a></div>
+        <p id="downloadAudioNote" class="hint"></p>
         <p class="hint">「ダウンロード」を押して保存してください。保存できない端末では「ファイルを開く」から保存・共有できます。次の書き出し開始まで再保存できます。</p>
       </div>
       <div id="easyPanel" class="easy" hidden>
@@ -4085,6 +4088,69 @@ J.autoLyricTimes = (lines, audio, options = {}) => {
 };
 })();
 
+/* Compressed source audio: browser recovery and portable project JSON. */
+(() => {
+'use strict';
+let database = null;
+function open() {
+  if (database) return Promise.resolve(database);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('jizura-audio-v1', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('files');
+    req.onerror = () => reject(req.error || new Error('曲の保存領域を開けません'));
+    req.onblocked = () => reject(new Error('別のタブを閉じてから再試行してください'));
+    req.onsuccess = () => {
+      database = req.result;
+      database.onversionchange = () => { database.close(); database = null; };
+      resolve(database);
+    };
+  });
+}
+async function transaction(mode, action) {
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('files', mode);
+    const req = action(tx.objectStore('files'));
+    // Request success is not a committed write: quota failures can abort later.
+    tx.oncomplete = () => resolve(req.result);
+    tx.onabort = tx.onerror = () => reject(tx.error || req.error || new Error('曲を保存・復元できません'));
+  });
+}
+J.projectAudio = {
+  metadata(file, audio) {
+    return { id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: file.name || 'song', type: file.type || 'application/octet-stream', size: file.size, duration: audio.duration };
+  },
+  store(meta, file) { return transaction('readwrite', store => store.put(file, meta.id)); },
+  async read(meta) {
+    const blob = await transaction('readonly', store => store.get(meta.id));
+    return blob ? new File([blob], meta.name || 'song', { type: meta.type || blob.type }) : null;
+  },
+  async portable(project, file) {
+    const copy = JSON.parse(JSON.stringify(project));
+    delete copy.audioData;
+    if (file) {
+      const url = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('曲を編集データに含められません'));
+        reader.readAsDataURL(file);
+      });
+      copy.audioData = url.slice(url.indexOf(',') + 1);
+    }
+    return copy;
+  },
+  embeddedFile(project) {
+    if (project.audioData == null) return null;
+    if (typeof project.audioData !== 'string' || !project.audioAsset) throw new Error('曲のデータが壊れています');
+    const raw = atob(project.audioData), bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    if (!bytes.length || (project.audioAsset.size != null && bytes.length !== project.audioAsset.size)) throw new Error('曲のデータが不足しています');
+    return new File([bytes], project.audioAsset.name || 'song', { type: project.audioAsset.type || 'application/octet-stream' });
+  },
+};
+})();
+
 /* ============================================================
    JIZURA — export: MP4 (WebCodecs + mp4-muxer), PNG sequence ZIP,
    file saving (artifact download capability or plain browser download)
@@ -4167,6 +4233,7 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
   const [w, h] = J.outputSize(project);
   const fps = plan.fps;
   const bitrate = J.exportBitrate(w, h, fps, quality);
+  if (project.includeAudio !== false && !audio?.buffer) throw new Error('音声が未読込です。「曲を読み込む」でMP3などを指定してください。音声なしで作る場合は「曲を動画に含める」をOFFにしてください。');
   const wantsAudio = audio && audio.buffer && project.includeAudio !== false;
   if (!Number.isFinite(plan.duration) || plan.duration <= 0) throw new Error('動画の長さを確認してください。');
   if ((bitrate + (wantsAudio ? 192000 : 0)) * plan.duration / 8 * 1.05 > MP4_MAX_BYTES) throw memoryError();
@@ -13653,7 +13720,7 @@ const ICON = {
   lock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>',
 };
 
-const S = { project: null, plan: null, audio: null, renderer: new J.Renderer(), playing: false, t: 0, t0: 0, previewRate: 1, loop: true, need: true, exporting: null, tap: null, slow: false, lineEls: [], curLine: -2 };
+const S = { project: null, plan: null, audio: null, audioFile: null, audioBusy: false, renderer: new J.Renderer(), playing: false, t: 0, t0: 0, previewRate: 1, loop: true, need: true, exporting: null, tap: null, slow: false, lineEls: [], curLine: -2 };
 
 /* WebAudio player (works inside sandboxed pages where blob media may be blocked) */
 const AP = {
@@ -13675,6 +13742,9 @@ const AP = {
 function mergeProject(p) {
   const d = J.defaultProject();
   const o = Object.assign(d, p || {});
+  // Only portable JSON contains the song bytes. Never copy them into localStorage
+  // or edit history: the compressed source is saved separately in IndexedDB.
+  delete o.audioData;
   o.fx = Object.assign(J.defaultProject().fx, (p && p.fx) || {});
   o.timing = Object.assign(J.defaultProject().timing, (p && p.timing) || {});
   const en = J.defaultProject().enabled;
@@ -13704,6 +13774,7 @@ function validStoredProject(p) {
   for (const key of ['fx', 'timing', 'enabled', 'overrides', 'colors', 'fonts', 'photo']) {
     if (p[key] != null && !object(p[key])) return false;
   }
+  if (p.audioAsset != null && (!object(p.audioAsset) || typeof p.audioAsset.id !== 'string')) return false;
   if (p.photo && p.photo.ids != null && !Array.isArray(p.photo.ids)) return false;
   if (p.userFonts != null && (!Array.isArray(p.userFonts) || p.userFonts.some(f => !object(f) || typeof f.key !== 'string' || typeof f.family !== 'string'))) return false;
   return true;
@@ -13823,13 +13894,123 @@ function autosave() {
   saveTimer = setTimeout(() => saveNow(), 700);
 }
 let recoveryDownload = null;
-function prepareRecovery() {
+async function prepareRecovery() {
   saveNow(true);
+  const portable = await J.projectAudio.portable(S.project, S.audioFile);
   if (recoveryDownload) recoveryDownload.dispose();
-  recoveryDownload = J.prepareDownload(baseName() + '.jizura.json', new Blob([JSON.stringify(S.project, null, 1)], { type: 'application/json' }));
+  recoveryDownload = J.prepareDownload(baseName() + '.jizura.json', new Blob([JSON.stringify(portable, null, 1)], { type: 'application/json' }));
   $('recoveryLink').href = recoveryDownload.url;
   $('recoveryLink').download = recoveryDownload.filename;
   $('exportRecovery').hidden = false;
+}
+
+/* ---------------- source audio and portable projects ---------------- */
+let audioRequest = 0;
+let audioNotice = '';
+function syncAudioStatus() {
+  $('audioName').textContent = S.audioBusy ? '曲を読み込み中…' : S.audio
+    ? `${S.audio.name}（${J.fmtTime(S.audio.duration)}・約${S.audio.bpm}BPM）`
+    : S.project.audioAsset ? `${S.project.audioAsset.name}（曲の再読み込みが必要です）` : '曲が未読込です';
+  $('audioStatus').textContent = audioNotice || (S.audioBusy ? '曲の読み込みが終わるまでお待ちください。'
+    : !S.audio ? '音声付き動画には「曲を読み込む」でMP3などを指定してください。'
+    : S.project.includeAudio === false ? '「曲を動画に含める」がOFFです。書き出す動画には音が入りません。'
+    : '曲は読み込み済みです。MP4と「保存」の編集データに音声を含めます。');
+  $('fileProject').disabled = !!S.exporting;
+  $('audioFile').disabled = !!S.exporting;
+  $('btnSave').disabled = S.audioBusy || !!S.exporting;
+}
+async function cacheAudio(project, file) {
+  try { await J.projectAudio.store(project.audioAsset, file); }
+  catch (e) {
+    if (S.project === project && S.audioFile === file) {
+      audioNotice = '曲をブラウザ内に保存できませんでした。今の再生・書き出しは可能です。「保存」で音声入り編集データを保管してください。';
+      syncAudioStatus();
+    }
+  }
+}
+async function restoreAudio() {
+  const project = S.project;
+  if (!project.audioAsset) { syncAudioStatus(); return; }
+  const request = ++audioRequest;
+  S.audioBusy = true; audioNotice = ''; syncAudioStatus();
+  try {
+    const file = await J.projectAudio.read(project.audioAsset);
+    if (!file) throw new Error('保存した曲が見つかりません。「曲を読み込む」で同じ曲を指定してください。');
+    const audio = await J.analyzeAudio(file);
+    if (request !== audioRequest || S.project !== project) return;
+    S.audio = audio; S.audioFile = file;
+    syncUI(); replan();
+  } catch (e) {
+    if (request === audioRequest && S.project === project) audioNotice = '曲を復元できませんでした。「曲を読み込む」で同じ曲を指定してください。歌詞の時刻は保持しています。';
+  } finally {
+    if (request === audioRequest) { S.audioBusy = false; syncAudioStatus(); }
+  }
+}
+async function loadSong(file) {
+  if (S.exporting) return;
+  const project = S.project, request = ++audioRequest;
+  pause(); if (S.tap) stopTap();
+  S.audioBusy = true; audioNotice = ''; syncAudioStatus();
+  try {
+    const audio = await J.analyzeAudio(file);
+    if (request !== audioRequest || S.project !== project) return;
+    S.audio = audio; S.audioFile = file; project.audioAsset = J.projectAudio.metadata(file, audio);
+    syncUI(); replan();
+    const hasTimes = Object.keys(project.timing.lineTimes || {}).length || Object.keys(project.timing.autoTimes || {}).length || J.parseLyrics(project.lyrics).lines.some(l => l.lrc != null);
+    if (!hasTimes) { project.timing.snap = true; autoTiming(); }
+    else $('timingStatus').textContent = '保存済みのタイミングを保持しました。必要なら範囲を指定して「曲に合わせて仮配置」を押してください。';
+    await cacheAudio(project, file);
+  } catch (e) {
+    if (request === audioRequest) audioNotice = '曲を読み込めませんでした。以前の曲と編集内容は保持しています。' + e.message;
+  } finally {
+    if (request === audioRequest) { S.audioBusy = false; syncAudioStatus(); }
+  }
+}
+async function openProject(file) {
+  if (S.exporting) return;
+  const request = ++audioRequest;
+  pause(); if (S.tap) stopTap();
+  S.audioBusy = true; audioNotice = ''; syncAudioStatus();
+  try {
+    const raw = JSON.parse(await file.text());
+    if (!validStoredProject(raw)) throw new Error('編集データの形式を確認してください。');
+    const project = mergeProject(raw);
+    let source = J.projectAudio.embeddedFile(raw), audio = null, notice = '';
+    if (source) {
+      audio = await J.analyzeAudio(source);
+      project.audioAsset = J.projectAudio.metadata(source, audio);
+    } else if (project.audioAsset) {
+      try {
+        source = await J.projectAudio.read(project.audioAsset);
+        if (source) audio = await J.analyzeAudio(source);
+      } catch (e) { source = null; }
+      if (!audio) notice = 'この編集データの曲を復元できません。「曲を読み込む」で同じ曲を指定してください。';
+    } else {
+      // Old projects have no song reference. Keep a song the user already loaded.
+      source = S.audioFile; audio = S.audio;
+      if (source && audio) project.audioAsset = S.project.audioAsset || J.projectAudio.metadata(source, audio);
+      else notice = 'このJSONには音声が含まれていません。「曲を読み込む」でMP3などを指定してください。';
+    }
+    if (request !== audioRequest) return;
+    S.project = project; S.audio = audio; S.audioFile = source; audioNotice = notice;
+    timingUndo = null; $('btnUndoTiming').disabled = true;
+    syncUI(); replan(); reconcilePhotos();
+    if (source && audio) await cacheAudio(project, source);
+  } catch (e) {
+    if (request === audioRequest) audioNotice = '編集データを読み込めませんでした。以前の曲と編集内容は保持しています。' + e.message;
+  } finally {
+    if (request === audioRequest) { S.audioBusy = false; syncAudioStatus(); }
+  }
+}
+async function saveProjectFile() {
+  if (S.audioBusy || S.exporting) return;
+  $('btnSave').disabled = true;
+  try {
+    await prepareRecovery();
+    await J.saveFile(recoveryDownload.filename, recoveryDownload.blob);
+    if (!S.audioFile) toast('曲が未読込のため、音声を含めず編集データを保存しました。');
+  } catch (e) { toast('編集データを保存できませんでした: ' + e.message); }
+  finally { syncAudioStatus(); }
 }
 
 /* ---------------- planning ---------------- */
@@ -13928,6 +14109,7 @@ function updateTimeUI() {
   if (!S.scrubbing) $('scrub').value = String(Math.round(S.t / Math.max(0.001, S.plan.duration) * 10000));
 }
 function play() {
+  if (S.audioBusy || S.exporting) return;
   if (S.audio) AP.play(S.audio.buffer, S.t);
   else S.t0 = performance.now() - S.t / (S.previewRate || 1) * 1000;
   S.playing = true; $('btnPlay').textContent = '❚❚'; $('btnPlay').setAttribute('aria-label', '一時停止');
@@ -14394,6 +14576,8 @@ function syncOut() {
   $('outAspect').value = S.project.aspect; $('outRes').value = String(S.project.res); $('outFps').value = String(S.project.fps);
   $('eAspect').value = S.project.aspect; $('eRes').value = String(S.project.res); $('eFps').value = String(S.project.fps);
   $('outQuality').value = S.project.quality || 'high'; $('outAudio').checked = S.project.includeAudio !== false;
+  $('eAudio').checked = S.project.includeAudio !== false;
+  syncAudioStatus();
 }
 async function codecNote() {
   const [w, h] = J.outputSize(S.project);
@@ -14405,29 +14589,34 @@ async function codecNote() {
 const EXP_BTNS = ['btnMP4', 'btnPNG', 'btnPNGA', 'eMP4'];
 function baseName() { return ((S.project.title || 'jizura').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'jizura'); }
 let lastDownload = null;
-function showDownload(filename, blob) {
+function showDownload(filename, blob, audioNote = '') {
   const result = J.prepareDownload(filename, blob);
   if (lastDownload) lastDownload.dispose();
   lastDownload = result;
   $('downloadLink').href = result.url; $('downloadLink').download = filename;
   $('downloadOpen').href = result.url;
   $('downloadName').textContent = `${filename}（${(blob.size / 1048576).toFixed(1)}MB）`;
+  $('downloadAudioNote').textContent = audioNote;
   $('downloadResult').hidden = false;
 }
-async function offerDownload(filename, blob) {
-  showDownload(filename, blob);
+async function offerDownload(filename, blob, audioNote = '') {
+  showDownload(filename, blob, audioNote);
   toast('書き出しが完了しました。「ダウンロード」を押して保存してください。');
 }
 async function runExport(kind) {
   if (S.exporting) return;
+  if (S.audioBusy || (kind === 'mp4' && S.project.includeAudio !== false && !S.audio?.buffer)) {
+    audioNotice = S.audioBusy ? '曲の読み込みが終わってから書き出してください。' : '音声が未読込のため書き出しを止めました。「曲を読み込む」でMP3などを指定してください。';
+    syncAudioStatus(); toast(audioNotice); return;
+  }
   pause();
   if (S.tap) stopTap();
-  prepareRecovery();
   // Release the previous video before allocating another export.
   if (lastDownload) { lastDownload.dispose(); lastDownload = null; }
   $('downloadLink').removeAttribute('href'); $('downloadOpen').removeAttribute('href');
   $('downloadResult').hidden = true;
   const ac = new AbortController(); S.exporting = ac;
+  syncAudioStatus();
   const boxes = [...document.querySelectorAll('.exp-box')];
   const setText = m => boxes.forEach(b => { b.querySelector('.exp-text').textContent = m; });
   const txt = { set textContent(m) { setText(m); }, get textContent() { return boxes[0].querySelector('.exp-text').textContent; } };
@@ -14437,11 +14626,15 @@ async function runExport(kind) {
   const onProgress = (p, m) => { boxes.forEach(b => { b.querySelector('.exp-bar').style.width = (p * 100).toFixed(1) + '%'; }); setText(m); };
   const t0 = performance.now();
   try {
+    await prepareRecovery();
     await J.ensureFonts(S.project.lyrics + (S.project.title || '') + (S.project.artist || '') + HUD_CHARS, null);
     if (kind === 'mp4') {
       const r = await J.exportMP4({ plan: S.plan, project: S.project, audio: S.project.includeAudio !== false ? S.audio : null, quality: S.project.quality || 'high', onProgress, signal: ac.signal });
       txt.textContent = `完成 ${(r.blob.size / 1048576).toFixed(1)}MB・${r.codec}${r.audio ? ' + ' + r.audio.toUpperCase() : ''}・${((performance.now() - t0) / 1000).toFixed(0)}秒`;
-      await offerDownload(baseName() + '.mp4', r.blob);
+      const audioNote = r.audio === 'opus'
+        ? '音声入りです。ただし、このブラウザの音声形式は一部のスマホの再生アプリに対応していません。音が出ない場合はChromeなどの対応プレーヤーで再生してください。'
+        : r.audio ? '音声入りのMP4です。' : '「曲を動画に含める」がOFFのため、音声なしのMP4です。';
+      await offerDownload(baseName() + '.mp4', r.blob, audioNote);
       txt.textContent += '・ダウンロードを押して保存';
     } else {
       const blob = await J.exportPNGZip({ plan: S.plan, project: S.project, transparent: kind === 'pnga', onProgress, signal: ac.signal });
@@ -14453,6 +14646,7 @@ async function runExport(kind) {
     console.error(e);
   } finally {
     S.exporting = null; S.need = true;
+    syncAudioStatus();
     EXP_BTNS.forEach(id => { $(id).disabled = false; });
     codecNote();
   }
@@ -14827,18 +15021,7 @@ function bind() {
   });
   $('audioFile').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    $('audioName').textContent = '解析中…';
-    try {
-      pause();
-      if (S.tap) stopTap();
-      S.audio = await J.analyzeAudio(f);
-      $('audioName').textContent = `${f.name}（${J.fmtTime(S.audio.duration)}・約${S.audio.bpm}BPM）`;
-      S.project.timing.snap = true;
-      syncUI(); replan();
-      const hasTimes = Object.keys(S.project.timing.lineTimes || {}).length || Object.keys(S.project.timing.autoTimes || {}).length || J.parseLyrics(S.project.lyrics).lines.some(l => l.lrc != null);
-      if (!hasTimes) autoTiming();
-      else $('timingStatus').textContent = '保存済みのタイミングを保持しました。必要なら範囲を指定して「曲に合わせて仮配置」を押してください。';
-    } catch (err) { $('audioName').textContent = '読み込めませんでした: ' + err.message; S.audio = null; syncUI(); replan(); }
+    await loadSong(f);
     e.target.value = '';
   });
   $('btnTap').addEventListener('click', () => (S.tap ? stopTap() : startTap()));
@@ -14893,7 +15076,7 @@ function bind() {
   ['outRes', 'eRes'].forEach(id => $(id).addEventListener('change', e => { S.project.res = +e.target.value; syncOut(); autosave(); codecNote(); }));
   ['outFps', 'eFps'].forEach(id => $(id).addEventListener('change', e => { S.project.fps = +e.target.value; syncOut(); replan(); codecNote(); }));
   $('outQuality').addEventListener('change', e => { S.project.quality = e.target.value; autosave(); });
-  $('outAudio').addEventListener('change', e => { S.project.includeAudio = e.target.checked; autosave(); });
+  ['outAudio', 'eAudio'].forEach(id => $(id).addEventListener('change', e => { S.project.includeAudio = e.target.checked; audioNotice = ''; syncOut(); autosave(); }));
   $('btnMP4').addEventListener('click', () => runExport('mp4'));
   $('btnPNG').addEventListener('click', () => runExport('png'));
   $('btnPNGA').addEventListener('click', () => runExport('pnga'));
@@ -14910,15 +15093,14 @@ function bind() {
   $('eMood').addEventListener('click', () => rerollPart('mood'));
   $('eCut').addEventListener('click', () => rerollPart('cut'));
   $('ePalette').addEventListener('click', () => { randomPalette(); restartPreview(); });
-  $('btnSave').addEventListener('click', () => { prepareRecovery(); J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)); });
+  $('btnSave').addEventListener('click', saveProjectFile);
   $('btnAE').addEventListener('click', () => {
     if (S.plan.photo && S.plan.photo.on) toast('写真PVモードの写真はAE用データには含まれません');
     J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1));
   });
   $('fileProject').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    try { S.project = mergeProject(JSON.parse(await f.text())); timingUndo = null; $('btnUndoTiming').disabled = true; syncUI(); replan(); reconcilePhotos(); }
-    catch (err) { showMsg('プロジェクトを読み込めませんでした'); setTimeout(() => showMsg(null), 2500); }
+    await openProject(f);
     e.target.value = '';
   });
   // 写真PV
@@ -14986,6 +15168,7 @@ function bind() {
 function boot() {
   S.project = loadLocal();
   bind(); syncUI(); replan(); reconcilePhotos();
+  restoreAudio();
   let mode = 'easy'; try { mode = localStorage.getItem('jizura.mode') || 'easy'; } catch (e) {}
   setMode(mode); commit();
   // open on a representative frame (end of the first cut's entrance)
