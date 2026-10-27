@@ -260,6 +260,14 @@ button.omakase:disabled { box-shadow: none; }
   .transport .hist-btns { display: none; }
 }
 
+
+.timing-guide { margin-top: 10px; }
+.timing-guide .row { flex-wrap: wrap; margin-top: 6px; }
+.ln .timing-tools { grid-column: 2 / 4; display: flex; gap: 4px; flex-wrap: wrap; }
+#downloadResult { border: 1px solid var(--cyan); border-radius: var(--r); margin-bottom: 12px; }
+#downloadName { overflow-wrap: anywhere; }
+#downloadResult a { cursor: pointer; color: var(--cyan); }
+
 </style>
 </head>
 <body>
@@ -302,10 +310,27 @@ button.omakase:disabled { box-shadow: none; }
 
       <div class="sec">
         <div class="sec-h"><h2>曲とタイミング</h2></div>
-        <div id="audioName" class="muted audio-name">曲なし（読み込むと拍を検出してカットを合わせます）</div>
+        <div id="audioName" class="muted audio-name">曲なし（歌詞を入力してから曲を読み込むと、自動で仮配置します）</div>
         <div class="row">
           <label class="file" title="mp3 / wav / m4a など">曲を読み込む<input id="audioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"></label>
           <button id="btnTap" title="曲を再生しながら各行の頭でタップ">タップで同期</button>
+        </div>
+        <div class="timing-guide">
+          <p class="hint">① 歌詞と曲を読み込む → ② 自動で仮配置 → ③ 再生しながら行ごとに修整</p>
+          <div class="fields">
+            <label class="field">歌い出し(秒)<input id="autoStart" type="number" min="0" step="0.01" value="0"></label>
+            <label class="field">歌い終わり(秒)<input id="autoEnd" type="number" min="0" step="0.01" placeholder="曲の終わり"></label>
+          </div>
+          <div class="row">
+            <button id="btnAutoStart" class="ghost small">今の位置を歌い出しに</button>
+            <button id="btnAutoEnd" class="ghost small">今の位置を歌い終わりに</button>
+          </div>
+          <div class="row">
+            <button id="btnAutoTiming" class="accent" disabled>曲に合わせて仮配置</button>
+            <button id="btnUndoTiming" class="ghost small" disabled>配置を元に戻す</button>
+          </div>
+          <p class="hint">拍・音量・歌詞の長さからの目安です。歌声の認識ではないため、前奏・間奏や歌い回しは手修整してください。再配置しても手修整とLRCの時刻は保ちます。</p>
+          <p id="timingStatus" class="hint" role="status" aria-live="polite"></p>
         </div>
         <div class="fields pro-only">
           <label class="field">BPM<input id="bpm" type="number" min="0" max="300" step="0.1" placeholder="自動"></label>
@@ -314,7 +339,7 @@ button.omakase:disabled { box-shadow: none; }
         </div>
         <div class="row pro-only">
           <label class="row" style="gap:6px"><input id="snap" type="checkbox"> 拍にスナップ</label>
-          <button id="btnResetTimes" class="ghost small">手動タイミングを消す</button>
+          <button id="btnResetTimes" class="ghost small">手修整を消す</button>
         </div>
         <div id="tapPanel" class="tapbox" hidden>
           <div class="hint">曲に合わせて、各行が始まる瞬間に <span class="kbd">Space</span> かボタンを押してください。</div>
@@ -326,6 +351,7 @@ button.omakase:disabled { box-shadow: none; }
 
       <div class="sec">
         <div class="sec-h"><h2>行とカット</h2><span id="linesInfo" class="muted mono"></span></div>
+        <p class="hint">歌詞を押すとその行へ移動。開始秒、±0.1秒、または「今の位置」で調整できます。</p>
         <ol id="lineList"></ol>
       </div>
     </section>
@@ -351,6 +377,16 @@ button.omakase:disabled { box-shadow: none; }
 
     <!-- ================= right: look & output ================= -->
     <section class="col col-right" aria-label="スタイルと書き出し">
+      <div id="exportRecovery" class="sec" hidden>
+        <a id="recoveryLink" class="file">編集データを保存</a>
+        <p class="hint">書き出し前の編集データです。ページを開き直してもブラウザの保存から復元します。念のためファイルでも保存できます（曲・写真の実体は含みません）。</p>
+      </div>
+      <div id="downloadResult" class="sec" hidden>
+        <h3>書き出したファイル</h3>
+        <p id="downloadName" class="hint"></p>
+        <div class="row"><a id="downloadLink" class="file">ダウンロード</a><a id="downloadOpen" target="_blank" rel="noopener">ファイルを開く</a></div>
+        <p class="hint">「ダウンロード」を押して保存してください。保存できない端末では「ファイルを開く」から保存・共有できます。次の書き出し開始まで再保存できます。</p>
+      </div>
       <div id="easyPanel" class="easy" hidden>
         <div class="easy-hero">
           <button id="btnOmakaseBig" class="omakase">おまかせで作る</button>
@@ -494,12 +530,14 @@ button.omakase:disabled { box-shadow: none; }
   </main>
 </div>
 
+
 <script>
 /*! mp4-muxer v5.2.2 | MIT License | (c) 2023 Vanilagy | see THIRD_PARTY_NOTICES.md */
 "use strict";var Mp4Muxer=(()=>{var we=Object.defineProperty,at=Object.getOwnPropertyDescriptor,nt=Object.getOwnPropertyNames,ot=Object.prototype.hasOwnProperty,ht=(e,t)=>{for(var s in t)we(e,s,{get:t[s],enumerable:!0})},lt=(e,t,s,r)=>{if(t&&typeof t=="object"||typeof t=="function")for(let a of nt(t))!ot.call(e,a)&&a!==s&&we(e,a,{get:()=>t[a],enumerable:!(r=at(t,a))||r.enumerable});return e},ft=e=>lt(we({},"__esModule",{value:!0}),e),ve=(e,t,s)=>{if(!t.has(e))throw TypeError("Cannot "+s)},i=(e,t,s)=>(ve(e,t,"read from private field"),s?s.call(e):t.get(e)),d=(e,t,s)=>{if(t.has(e))throw TypeError("Cannot add the same private member more than once");t instanceof WeakSet?t.add(e):t.set(e,s)},C=(e,t,s,r)=>(ve(e,t,"write to private field"),r?r.call(e,s):t.set(e,s),s),ut=(e,t,s,r)=>({set _(a){C(e,t,a,s)},get _(){return i(e,t,r)}}),m=(e,t,s)=>(ve(e,t,"access private method"),s),Re={};ht(Re,{ArrayBufferTarget:()=>qe,FileSystemWritableFileStreamTarget:()=>Xe,Muxer:()=>vi,StreamTarget:()=>Te});var p=new Uint8Array(8),z=new DataView(p.buffer),y=e=>[(e%256+256)%256],c=e=>(z.setUint16(0,e,!1),[p[0],p[1]]),dt=e=>(z.setInt16(0,e,!1),[p[0],p[1]]),Pe=e=>(z.setUint32(0,e,!1),[p[1],p[2],p[3]]),n=e=>(z.setUint32(0,e,!1),[p[0],p[1],p[2],p[3]]),mt=e=>(z.setInt32(0,e,!1),[p[0],p[1],p[2],p[3]]),x=e=>(z.setUint32(0,Math.floor(e/2**32),!1),z.setUint32(4,e,!1),[p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7]]),ge=e=>(z.setInt16(0,2**8*e,!1),[p[0],p[1]]),A=e=>(z.setInt32(0,2**16*e,!1),[p[0],p[1],p[2],p[3]]),ye=e=>(z.setInt32(0,2**30*e,!1),[p[0],p[1],p[2],p[3]]),E=(e,t=!1)=>{let s=Array(e.length).fill(null).map((r,a)=>e.charCodeAt(a));return t&&s.push(0),s},se=e=>e&&e[e.length-1],Ce=e=>{let t;for(let s of e)(!t||s.presentationTimestamp>t.presentationTimestamp)&&(t=s);return t},O=(e,t,s=!0)=>{let r=e*t;return s?Math.round(r):r},Le=e=>{let t=e*(Math.PI/180),s=Math.cos(t),r=Math.sin(t);return[s,r,0,-r,s,0,0,0,1]},Ve=Le(0),je=e=>[A(e[0]),A(e[1]),ye(e[2]),A(e[3]),A(e[4]),ye(e[5]),A(e[6]),A(e[7]),ye(e[8])],X=e=>!e||typeof e!="object"?e:Array.isArray(e)?e.map(X):Object.fromEntries(Object.entries(e).map(([t,s])=>[t,X(s)])),V=e=>e>=0&&e<2**32,v=(e,t,s)=>({type:e,contents:t&&new Uint8Array(t.flat(10)),children:s}),w=(e,t,s,r,a)=>v(e,[y(t),Pe(s),r??[]],a),pt=e=>{let t=512;return e.fragmented?v("ftyp",[E("iso5"),n(t),E("iso5"),E("iso6"),E("mp41")]):v("ftyp",[E("isom"),n(t),E("isom"),e.holdsAvc?E("avc1"):[],E("mp41")])},Se=e=>({type:"mdat",largeSize:e}),ct=e=>({type:"free",size:e}),re=(e,t,s=!1)=>v("moov",null,[wt(t,e),...e.map(r=>vt(r,t)),s?Gt(e):null]),wt=(e,t)=>{let s=O(Math.max(0,...t.filter(l=>l.samples.length>0).map(l=>{const u=Ce(l.samples);return u.presentationTimestamp+u.duration})),Ae),r=Math.max(...t.map(l=>l.id))+1,a=!V(e)||!V(s),o=a?x:n;return w("mvhd",+a,0,[o(e),o(e),n(Ae),o(s),A(1),ge(1),Array(10).fill(0),je(Ve),Array(24).fill(0),n(r)])},vt=(e,t)=>v("trak",null,[gt(e,t),yt(e,t)]),gt=(e,t)=>{let s=Ce(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,Ae),a=!V(t)||!V(r),o=a?x:n,l;return e.info.type==="video"?l=typeof e.info.rotation=="number"?Le(e.info.rotation):e.info.rotation:l=Ve,w("tkhd",+a,3,[o(t),o(t),n(e.id),n(0),o(r),Array(8).fill(0),c(0),c(0),ge(e.info.type==="audio"?1:0),c(0),je(l),A(e.info.type==="video"?e.info.width:0),A(e.info.type==="video"?e.info.height:0)])},yt=(e,t)=>v("mdia",null,[Ct(e,t),St(e.info.type==="video"?"vide":"soun"),Tt(e)]),Ct=(e,t)=>{let s=Ce(e.samples),r=O(s?s.presentationTimestamp+s.duration:0,e.timescale),a=!V(t)||!V(r),o=a?x:n;return w("mdhd",+a,0,[o(t),o(t),n(e.timescale),o(r),c(21956),c(0)])},St=e=>w("hdlr",0,0,[E("mhlr"),E(e),n(0),n(0),n(0),E("mp4-muxer-hdlr",!0)]),Tt=e=>v("minf",null,[e.info.type==="video"?bt():_t(),kt(),At(e)]),bt=()=>w("vmhd",0,1,[c(0),c(0),c(0),c(0)]),_t=()=>w("smhd",0,0,[c(0),c(0)]),kt=()=>v("dinf",null,[Et()]),Et=()=>w("dref",0,0,[n(1)],[zt()]),zt=()=>w("url ",0,1),At=e=>{const t=e.compositionTimeOffsetTable.length>1||e.compositionTimeOffsetTable.some(s=>s.sampleCompositionTimeOffset!==0);return v("stbl",null,[Ot(e),Vt(e),jt(e),$t(e),Ht(e),qt(e),t?Xt(e):null])},Ot=e=>w("stsd",0,0,[n(1)],[e.info.type==="video"?Mt(ri[e.info.codec],e):Rt(ni[e.info.codec],e)]),Mt=(e,t)=>v(e,[Array(6).fill(0),c(1),c(0),c(0),Array(12).fill(0),c(t.info.width),c(t.info.height),n(4718592),n(4718592),n(0),c(1),Array(32).fill(0),c(24),dt(65535)],[ai[t.info.codec](t),t.info.decoderConfig.colorSpace?Ut(t):null]),Bt={bt709:1,bt470bg:5,smpte170m:6},It={bt709:1,smpte170m:6,"iec61966-2-1":13},Dt={rgb:0,bt709:1,bt470bg:5,smpte170m:6},Ut=e=>v("colr",[E("nclx"),c(Bt[e.info.decoderConfig.colorSpace.primaries]),c(It[e.info.decoderConfig.colorSpace.transfer]),c(Dt[e.info.decoderConfig.colorSpace.matrix]),y((e.info.decoderConfig.colorSpace.fullRange?1:0)<<7)]),xt=e=>e.info.decoderConfig&&v("avcC",[...new Uint8Array(e.info.decoderConfig.description)]),Wt=e=>e.info.decoderConfig&&v("hvcC",[...new Uint8Array(e.info.decoderConfig.description)]),Ft=e=>{if(!e.info.decoderConfig)return null;let t=e.info.decoderConfig;if(!t.colorSpace)throw new Error("'colorSpace' is required in the decoder config for VP9.");let s=t.codec.split("."),r=Number(s[1]),a=Number(s[2]),u=(Number(s[3])<<4)+(0<<1)+Number(t.colorSpace.fullRange);return w("vpcC",1,0,[y(r),y(a),y(u),y(2),y(2),y(2),c(0)])},Nt=()=>{let s=(1<<7)+1;return v("av1C",[s,0,0,0])},Rt=(e,t)=>v(e,[Array(6).fill(0),c(1),c(0),c(0),n(0),c(t.info.numberOfChannels),c(16),c(0),c(0),A(t.info.sampleRate)],[oi[t.info.codec](t)]),Pt=e=>{let t=new Uint8Array(e.info.decoderConfig.description);return w("esds",0,0,[n(58753152),y(32+t.byteLength),c(1),y(0),n(75530368),y(18+t.byteLength),y(64),y(21),Pe(0),n(130071),n(130071),n(92307584),y(t.byteLength),...t,n(109084800),y(1),y(2)])},Lt=e=>{let t=3840,s=0;const r=e.info.decoderConfig?.description;if(r){if(r.byteLength<18)throw new TypeError("Invalid decoder description provided for Opus; must be at least 18 bytes long.");const a=ArrayBuffer.isView(r)?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(r);t=a.getUint16(10,!0),s=a.getInt16(14,!0)}return v("dOps",[y(0),y(e.info.numberOfChannels),c(t),n(e.info.sampleRate),ge(s),y(0)])},Vt=e=>w("stts",0,0,[n(e.timeToSampleTable.length),e.timeToSampleTable.map(t=>[n(t.sampleCount),n(t.sampleDelta)])]),jt=e=>{if(e.samples.every(s=>s.type==="key"))return null;let t=[...e.samples.entries()].filter(([,s])=>s.type==="key");return w("stss",0,0,[n(t.length),t.map(([s])=>n(s+1))])},$t=e=>w("stsc",0,0,[n(e.compactlyCodedChunkTable.length),e.compactlyCodedChunkTable.map(t=>[n(t.firstChunk),n(t.samplesPerChunk),n(1)])]),Ht=e=>w("stsz",0,0,[n(0),n(e.samples.length),e.samples.map(t=>n(t.size))]),qt=e=>e.finalizedChunks.length>0&&se(e.finalizedChunks).offset>=2**32?w("co64",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>x(t.offset))]):w("stco",0,0,[n(e.finalizedChunks.length),e.finalizedChunks.map(t=>n(t.offset))]),Xt=e=>w("ctts",0,0,[n(e.compositionTimeOffsetTable.length),e.compositionTimeOffsetTable.map(t=>[n(t.sampleCount),n(t.sampleCompositionTimeOffset)])]),Gt=e=>v("mvex",null,e.map(Zt)),Zt=e=>w("trex",0,0,[n(e.id),n(1),n(0),n(0),n(0)]),$e=(e,t)=>v("moof",null,[Kt(e),...t.map(Qt)]),Kt=e=>w("mfhd",0,0,[n(e)]),He=e=>{let t=0,s=0,r=0,a=0,o=e.type==="delta";return s|=+o,o?t|=1:t|=2,t<<24|s<<16|r<<8|a},Qt=e=>v("traf",null,[Jt(e),Yt(e),ei(e)]),Jt=e=>{let t=0;t|=8,t|=16,t|=32,t|=131072;let s=e.currentChunk.samples[1]??e.currentChunk.samples[0],r={duration:s.timescaleUnitsToNextSample,size:s.size,flags:He(s)};return w("tfhd",0,t,[n(e.id),n(r.duration),n(r.size),n(r.flags)])},Yt=e=>w("tfdt",1,0,[x(O(e.currentChunk.startTimestamp,e.timescale))]),ei=e=>{let t=e.currentChunk.samples.map(D=>D.timescaleUnitsToNextSample),s=e.currentChunk.samples.map(D=>D.size),r=e.currentChunk.samples.map(He),a=e.currentChunk.samples.map(D=>O(D.presentationTimestamp-D.decodeTimestamp,e.timescale)),o=new Set(t),l=new Set(s),u=new Set(r),g=new Set(a),b=u.size===2&&r[0]!==r[1],U=o.size>1,ie=l.size>1,st=!b&&u.size>1,rt=g.size>1||[...g].some(D=>D!==0),L=0;return L|=1,L|=4*+b,L|=256*+U,L|=512*+ie,L|=1024*+st,L|=2048*+rt,w("trun",1,L,[n(e.currentChunk.samples.length),n(e.currentChunk.offset-e.currentChunk.moofOffset||0),b?n(r[0]):[],e.currentChunk.samples.map((D,ce)=>[U?n(t[ce]):[],ie?n(s[ce]):[],st?n(r[ce]):[],rt?mt(a[ce]):[]])])},ti=e=>v("mfra",null,[...e.map(ii),si()]),ii=(e,t)=>w("tfra",1,0,[n(e.id),n(63),n(e.finalizedChunks.length),e.finalizedChunks.map(r=>[x(O(r.startTimestamp,e.timescale)),x(r.moofOffset),n(t+1),n(1),n(1)])]),si=()=>w("mfro",0,0,[n(0)]),ri={avc:"avc1",hevc:"hvc1",vp9:"vp09",av1:"av01"},ai={avc:xt,hevc:Wt,vp9:Ft,av1:Nt},ni={aac:"mp4a",opus:"Opus"},oi={aac:Pt,opus:Lt},hi=Symbol("isTarget"),ae=class{},qe=class extends ae{constructor(){super(...arguments),this.buffer=null}},Te=class extends ae{constructor(e){if(super(),this.options=e,typeof e!="object")throw new TypeError("StreamTarget requires an options object to be passed to its constructor.");if(e.onData){if(typeof e.onData!="function")throw new TypeError("options.onData, when provided, must be a function.");if(e.onData.length<2)throw new TypeError("options.onData, when provided, must be a function that takes in at least two arguments (data and position). Ignoring the position argument, which specifies the byte offset at which the data is to be written, can lead to broken outputs.")}if(e.chunked!==void 0&&typeof e.chunked!="boolean")throw new TypeError("options.chunked, when provided, must be a boolean.");if(e.chunkSize!==void 0&&(!Number.isInteger(e.chunkSize)||e.chunkSize<1024))throw new TypeError("options.chunkSize, when provided, must be an integer and not smaller than 1024.")}},Xe=class extends ae{constructor(e,t){if(super(),this.stream=e,this.options=t,!(e instanceof FileSystemWritableFileStream))throw new TypeError("FileSystemWritableFileStreamTarget requires a FileSystemWritableFileStream instance.");if(t!==void 0&&typeof t!="object")throw new TypeError("FileSystemWritableFileStreamTarget's options, when provided, must be an object.");if(t&&t.chunkSize!==void 0&&(!Number.isInteger(t.chunkSize)||t.chunkSize<=0))throw new TypeError("options.chunkSize, when provided, must be a positive integer")}},W,j,Ge=class{constructor(){this.pos=0,d(this,W,new Uint8Array(8)),d(this,j,new DataView(i(this,W).buffer)),this.offsets=new WeakMap}seek(e){this.pos=e}writeU32(e){i(this,j).setUint32(0,e,!1),this.write(i(this,W).subarray(0,4))}writeU64(e){i(this,j).setUint32(0,Math.floor(e/2**32),!1),i(this,j).setUint32(4,e,!1),this.write(i(this,W).subarray(0,8))}writeAscii(e){for(let t=0;t<e.length;t++)i(this,j).setUint8(t%8,e.charCodeAt(t)),t%8===7&&this.write(i(this,W));e.length%8!==0&&this.write(i(this,W).subarray(0,e.length%8))}writeBox(e){if(this.offsets.set(e,this.pos),e.contents&&!e.children)this.writeBoxHeader(e,e.size??e.contents.byteLength+8),this.write(e.contents);else{let t=this.pos;if(this.writeBoxHeader(e,0),e.contents&&this.write(e.contents),e.children)for(let a of e.children)a&&this.writeBox(a);let s=this.pos,r=e.size??s-t;this.seek(t),this.writeBoxHeader(e,r),this.seek(s)}}writeBoxHeader(e,t){this.writeU32(e.largeSize?1:t),this.writeAscii(e.type),e.largeSize&&this.writeU64(t)}measureBoxHeader(e){return 8+(e.largeSize?8:0)}patchBox(e){let t=this.pos;this.seek(this.offsets.get(e)),this.writeBox(e),this.seek(t)}measureBox(e){if(e.contents&&!e.children)return this.measureBoxHeader(e)+e.contents.byteLength;{let t=this.measureBoxHeader(e);if(e.contents&&(t+=e.contents.byteLength),e.children)for(let s of e.children)s&&(t+=this.measureBox(s));return t}}};W=new WeakMap,j=new WeakMap;var ne,F,G,Z,oe,be,li=class extends Ge{constructor(e){super(),d(this,oe),d(this,ne,void 0),d(this,F,new ArrayBuffer(2**16)),d(this,G,new Uint8Array(i(this,F))),d(this,Z,0),C(this,ne,e)}write(e){m(this,oe,be).call(this,this.pos+e.byteLength),i(this,G).set(e,this.pos),this.pos+=e.byteLength,C(this,Z,Math.max(i(this,Z),this.pos))}finalize(){m(this,oe,be).call(this,this.pos),i(this,ne).buffer=i(this,F).slice(0,Math.max(i(this,Z),this.pos))}};ne=new WeakMap,F=new WeakMap,G=new WeakMap,Z=new WeakMap,oe=new WeakSet,be=function(e){let t=i(this,F).byteLength;for(;t<e;)t*=2;if(t===i(this,F).byteLength)return;let s=new ArrayBuffer(t),r=new Uint8Array(s);r.set(i(this,G),0),C(this,F,s),C(this,G,r)};var fi=2**24,ui=2,K,N,Q,B,_,he,_e,ke,Ze,Ee,Ke,J,le,ze=class extends Ge{constructor(e){super(),d(this,he),d(this,ke),d(this,Ee),d(this,J),d(this,K,void 0),d(this,N,[]),d(this,Q,void 0),d(this,B,void 0),d(this,_,[]),C(this,K,e),C(this,Q,e.options?.chunked??!1),C(this,B,e.options?.chunkSize??fi)}write(e){i(this,N).push({data:e.slice(),start:this.pos}),this.pos+=e.byteLength}flush(){if(i(this,N).length===0)return;let e=[],t=[...i(this,N)].sort((s,r)=>s.start-r.start);e.push({start:t[0].start,size:t[0].data.byteLength});for(let s=1;s<t.length;s++){let r=e[e.length-1],a=t[s];a.start<=r.start+r.size?r.size=Math.max(r.size,a.start+a.data.byteLength-r.start):e.push({start:a.start,size:a.data.byteLength})}for(let s of e){s.data=new Uint8Array(s.size);for(let r of i(this,N))s.start<=r.start&&r.start<s.start+s.size&&s.data.set(r.data,r.start-s.start);i(this,Q)?(m(this,he,_e).call(this,s.data,s.start),m(this,J,le).call(this)):i(this,K).options.onData?.(s.data,s.start)}i(this,N).length=0}finalize(){i(this,Q)&&m(this,J,le).call(this,!0)}};K=new WeakMap,N=new WeakMap,Q=new WeakMap,B=new WeakMap,_=new WeakMap,he=new WeakSet,_e=function(e,t){let s=i(this,_).findIndex(u=>u.start<=t&&t<u.start+i(this,B));s===-1&&(s=m(this,Ee,Ke).call(this,t));let r=i(this,_)[s],a=t-r.start,o=e.subarray(0,Math.min(i(this,B)-a,e.byteLength));r.data.set(o,a);let l={start:a,end:a+o.byteLength};if(m(this,ke,Ze).call(this,r,l),r.written[0].start===0&&r.written[0].end===i(this,B)&&(r.shouldFlush=!0),i(this,_).length>ui){for(let u=0;u<i(this,_).length-1;u++)i(this,_)[u].shouldFlush=!0;m(this,J,le).call(this)}o.byteLength<e.byteLength&&m(this,he,_e).call(this,e.subarray(o.byteLength),t+o.byteLength)},ke=new WeakSet,Ze=function(e,t){let s=0,r=e.written.length-1,a=-1;for(;s<=r;){let o=Math.floor(s+(r-s+1)/2);e.written[o].start<=t.start?(s=o+1,a=o):r=o-1}for(e.written.splice(a+1,0,t),(a===-1||e.written[a].end<t.start)&&a++;a<e.written.length-1&&e.written[a].end>=e.written[a+1].start;)e.written[a].end=Math.max(e.written[a].end,e.written[a+1].end),e.written.splice(a+1,1)},Ee=new WeakSet,Ke=function(e){let s={start:Math.floor(e/i(this,B))*i(this,B),data:new Uint8Array(i(this,B)),written:[],shouldFlush:!1};return i(this,_).push(s),i(this,_).sort((r,a)=>r.start-a.start),i(this,_).indexOf(s)},J=new WeakSet,le=function(e=!1){for(let t=0;t<i(this,_).length;t++){let s=i(this,_)[t];if(!(!s.shouldFlush&&!e)){for(let r of s.written)i(this,K).options.onData?.(s.data.subarray(r.start,r.end),s.start+r.start);i(this,_).splice(t--,1)}}};var di=class extends ze{constructor(e){super(new Te({onData:(t,s)=>e.stream.write({type:"write",data:t,position:s}),chunked:!0,chunkSize:e.options?.chunkSize}))}},Ae=1e3,mi=["avc","hevc","vp9","av1"],pi=["aac","opus"],ci=2082844800,wi=["strict","offset","cross-track-offset"],h,f,fe,k,T,S,$,H,Oe,R,P,Y,Me,Qe,Be,Je,Ie,Ye,De,et,Ue,tt,ue,xe,M,I,We,it,ee,de,me,Fe,q,te,pe,Ne,vi=class{constructor(e){if(d(this,Me),d(this,Be),d(this,Ie),d(this,De),d(this,Ue),d(this,ue),d(this,M),d(this,We),d(this,ee),d(this,me),d(this,q),d(this,pe),d(this,h,void 0),d(this,f,void 0),d(this,fe,void 0),d(this,k,void 0),d(this,T,null),d(this,S,null),d(this,$,Math.floor(Date.now()/1e3)+ci),d(this,H,[]),d(this,Oe,1),d(this,R,[]),d(this,P,[]),d(this,Y,!1),m(this,Me,Qe).call(this,e),e.video=X(e.video),e.audio=X(e.audio),e.fastStart=X(e.fastStart),this.target=e.target,C(this,h,{firstTimestampBehavior:"strict",...e}),e.target instanceof qe)C(this,f,new li(e.target));else if(e.target instanceof Te)C(this,f,new ze(e.target));else if(e.target instanceof Xe)C(this,f,new di(e.target));else throw new Error(`Invalid target: ${e.target}`);m(this,De,et).call(this),m(this,Be,Je).call(this)}addVideoChunk(e,t,s,r){if(!(e instanceof EncodedVideoChunk))throw new TypeError("addVideoChunk's first argument (sample) must be of type EncodedVideoChunk.");if(t&&typeof t!="object")throw new TypeError("addVideoChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addVideoChunk's third argument (timestamp), when provided, must be a non-negative real number.");if(r!==void 0&&!Number.isFinite(r))throw new TypeError("addVideoChunk's fourth argument (compositionTimeOffset), when provided, must be a real number.");let a=new Uint8Array(e.byteLength);e.copyTo(a),this.addVideoChunkRaw(a,e.type,s??e.timestamp,e.duration,t,r)}addVideoChunkRaw(e,t,s,r,a,o){if(!(e instanceof Uint8Array))throw new TypeError("addVideoChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addVideoChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addVideoChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addVideoChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addVideoChunkRaw's fifth argument (meta), when provided, must be an object.");if(o!==void 0&&!Number.isFinite(o))throw new TypeError("addVideoChunkRaw's sixth argument (compositionTimeOffset), when provided, must be a real number.");if(m(this,pe,Ne).call(this),!i(this,h).video)throw new Error("No video track declared.");if(typeof i(this,h).fastStart=="object"&&i(this,T).samples.length===i(this,h).fastStart.expectedVideoChunks)throw new Error(`Cannot add more video chunks than specified in 'fastStart' (${i(this,h).fastStart.expectedVideoChunks}).`);let l=m(this,ue,xe).call(this,i(this,T),e,t,s,r,a,o);if(i(this,h).fastStart==="fragmented"&&i(this,S)){for(;i(this,P).length>0&&i(this,P)[0].decodeTimestamp<=l.decodeTimestamp;){let u=i(this,P).shift();m(this,M,I).call(this,i(this,S),u)}l.decodeTimestamp<=i(this,S).lastDecodeTimestamp?m(this,M,I).call(this,i(this,T),l):i(this,R).push(l)}else m(this,M,I).call(this,i(this,T),l)}addAudioChunk(e,t,s){if(!(e instanceof EncodedAudioChunk))throw new TypeError("addAudioChunk's first argument (sample) must be of type EncodedAudioChunk.");if(t&&typeof t!="object")throw new TypeError("addAudioChunk's second argument (meta), when provided, must be an object.");if(s!==void 0&&(!Number.isFinite(s)||s<0))throw new TypeError("addAudioChunk's third argument (timestamp), when provided, must be a non-negative real number.");let r=new Uint8Array(e.byteLength);e.copyTo(r),this.addAudioChunkRaw(r,e.type,s??e.timestamp,e.duration,t)}addAudioChunkRaw(e,t,s,r,a){if(!(e instanceof Uint8Array))throw new TypeError("addAudioChunkRaw's first argument (data) must be an instance of Uint8Array.");if(t!=="key"&&t!=="delta")throw new TypeError("addAudioChunkRaw's second argument (type) must be either 'key' or 'delta'.");if(!Number.isFinite(s)||s<0)throw new TypeError("addAudioChunkRaw's third argument (timestamp) must be a non-negative real number.");if(!Number.isFinite(r)||r<0)throw new TypeError("addAudioChunkRaw's fourth argument (duration) must be a non-negative real number.");if(a&&typeof a!="object")throw new TypeError("addAudioChunkRaw's fifth argument (meta), when provided, must be an object.");if(m(this,pe,Ne).call(this),!i(this,h).audio)throw new Error("No audio track declared.");if(typeof i(this,h).fastStart=="object"&&i(this,S).samples.length===i(this,h).fastStart.expectedAudioChunks)throw new Error(`Cannot add more audio chunks than specified in 'fastStart' (${i(this,h).fastStart.expectedAudioChunks}).`);let o=m(this,ue,xe).call(this,i(this,S),e,t,s,r,a);if(i(this,h).fastStart==="fragmented"&&i(this,T)){for(;i(this,R).length>0&&i(this,R)[0].decodeTimestamp<=o.decodeTimestamp;){let l=i(this,R).shift();m(this,M,I).call(this,i(this,T),l)}o.decodeTimestamp<=i(this,T).lastDecodeTimestamp?m(this,M,I).call(this,i(this,S),o):i(this,P).push(o)}else m(this,M,I).call(this,i(this,S),o)}finalize(){if(i(this,Y))throw new Error("Cannot finalize a muxer more than once.");if(i(this,h).fastStart==="fragmented"){for(let t of i(this,R))m(this,M,I).call(this,i(this,T),t);for(let t of i(this,P))m(this,M,I).call(this,i(this,S),t);m(this,me,Fe).call(this,!1)}else i(this,T)&&m(this,ee,de).call(this,i(this,T)),i(this,S)&&m(this,ee,de).call(this,i(this,S));let e=[i(this,T),i(this,S)].filter(Boolean);if(i(this,h).fastStart==="in-memory"){let t;for(let r=0;r<2;r++){let a=re(e,i(this,$)),o=i(this,f).measureBox(a);t=i(this,f).measureBox(i(this,k));let l=i(this,f).pos+o+t;for(let u of i(this,H)){u.offset=l;for(let{data:g}of u.samples)l+=g.byteLength,t+=g.byteLength}if(l<2**32)break;t>=2**32&&(i(this,k).largeSize=!0)}let s=re(e,i(this,$));i(this,f).writeBox(s),i(this,k).size=t,i(this,f).writeBox(i(this,k));for(let r of i(this,H))for(let a of r.samples)i(this,f).write(a.data),a.data=null}else if(i(this,h).fastStart==="fragmented"){let t=i(this,f).pos,s=ti(e);i(this,f).writeBox(s);let r=i(this,f).pos-t;i(this,f).seek(i(this,f).pos-4),i(this,f).writeU32(r)}else{let t=i(this,f).offsets.get(i(this,k)),s=i(this,f).pos-t;i(this,k).size=s,i(this,k).largeSize=s>=2**32,i(this,f).patchBox(i(this,k));let r=re(e,i(this,$));if(typeof i(this,h).fastStart=="object"){i(this,f).seek(i(this,fe)),i(this,f).writeBox(r);let a=t-i(this,f).pos;i(this,f).writeBox(ct(a))}else i(this,f).writeBox(r)}m(this,q,te).call(this),i(this,f).finalize(),C(this,Y,!0)}};return h=new WeakMap,f=new WeakMap,fe=new WeakMap,k=new WeakMap,T=new WeakMap,S=new WeakMap,$=new WeakMap,H=new WeakMap,Oe=new WeakMap,R=new WeakMap,P=new WeakMap,Y=new WeakMap,Me=new WeakSet,Qe=function(e){if(typeof e!="object")throw new TypeError("The muxer requires an options object to be passed to its constructor.");if(!(e.target instanceof ae))throw new TypeError("The target must be provided and an instance of Target.");if(e.video){if(!mi.includes(e.video.codec))throw new TypeError(`Unsupported video codec: ${e.video.codec}`);if(!Number.isInteger(e.video.width)||e.video.width<=0)throw new TypeError(`Invalid video width: ${e.video.width}. Must be a positive integer.`);if(!Number.isInteger(e.video.height)||e.video.height<=0)throw new TypeError(`Invalid video height: ${e.video.height}. Must be a positive integer.`);const t=e.video.rotation;if(typeof t=="number"&&![0,90,180,270].includes(t))throw new TypeError(`Invalid video rotation: ${t}. Has to be 0, 90, 180 or 270.`);if(Array.isArray(t)&&(t.length!==9||t.some(s=>typeof s!="number")))throw new TypeError(`Invalid video transformation matrix: ${t.join()}`);if(e.video.frameRate!==void 0&&(!Number.isInteger(e.video.frameRate)||e.video.frameRate<=0))throw new TypeError(`Invalid video frame rate: ${e.video.frameRate}. Must be a positive integer.`)}if(e.audio){if(!pi.includes(e.audio.codec))throw new TypeError(`Unsupported audio codec: ${e.audio.codec}`);if(!Number.isInteger(e.audio.numberOfChannels)||e.audio.numberOfChannels<=0)throw new TypeError(`Invalid number of audio channels: ${e.audio.numberOfChannels}. Must be a positive integer.`);if(!Number.isInteger(e.audio.sampleRate)||e.audio.sampleRate<=0)throw new TypeError(`Invalid audio sample rate: ${e.audio.sampleRate}. Must be a positive integer.`)}if(e.firstTimestampBehavior&&!wi.includes(e.firstTimestampBehavior))throw new TypeError(`Invalid first timestamp behavior: ${e.firstTimestampBehavior}`);if(typeof e.fastStart=="object"){if(e.video){if(e.fastStart.expectedVideoChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedVideoChunks'.");if(!Number.isInteger(e.fastStart.expectedVideoChunks)||e.fastStart.expectedVideoChunks<0)throw new TypeError("'expectedVideoChunks' must be a non-negative integer.")}if(e.audio){if(e.fastStart.expectedAudioChunks===void 0)throw new TypeError("'fastStart' is an object but is missing property 'expectedAudioChunks'.");if(!Number.isInteger(e.fastStart.expectedAudioChunks)||e.fastStart.expectedAudioChunks<0)throw new TypeError("'expectedAudioChunks' must be a non-negative integer.")}}else if(![!1,"in-memory","fragmented"].includes(e.fastStart))throw new TypeError("'fastStart' option must be false, 'in-memory', 'fragmented' or an object.");if(e.minFragmentDuration!==void 0&&(!Number.isFinite(e.minFragmentDuration)||e.minFragmentDuration<0))throw new TypeError("'minFragmentDuration' must be a non-negative number.")},Be=new WeakSet,Je=function(){if(i(this,f).writeBox(pt({holdsAvc:i(this,h).video?.codec==="avc",fragmented:i(this,h).fastStart==="fragmented"})),C(this,fe,i(this,f).pos),i(this,h).fastStart==="in-memory")C(this,k,Se(!1));else if(i(this,h).fastStart!=="fragmented"){if(typeof i(this,h).fastStart=="object"){let e=m(this,Ie,Ye).call(this);i(this,f).seek(i(this,f).pos+e)}C(this,k,Se(!0)),i(this,f).writeBox(i(this,k))}m(this,q,te).call(this)},Ie=new WeakSet,Ye=function(){if(typeof i(this,h).fastStart!="object")return;let e=0,t=[i(this,h).fastStart.expectedVideoChunks,i(this,h).fastStart.expectedAudioChunks];for(let s of t)s&&(e+=8*Math.ceil(.6666666666666666*s),e+=4*s,e+=12*Math.ceil(.6666666666666666*s),e+=4*s,e+=8*s);return e+=4096,e},De=new WeakSet,et=function(){if(i(this,h).video&&C(this,T,{id:1,info:{type:"video",codec:i(this,h).video.codec,width:i(this,h).video.width,height:i(this,h).video.height,rotation:i(this,h).video.rotation??0,decoderConfig:null},timescale:i(this,h).video.frameRate??57600,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,h).audio&&(C(this,S,{id:i(this,h).video?2:1,info:{type:"audio",codec:i(this,h).audio.codec,numberOfChannels:i(this,h).audio.numberOfChannels,sampleRate:i(this,h).audio.sampleRate,decoderConfig:null},timescale:i(this,h).audio.sampleRate,samples:[],finalizedChunks:[],currentChunk:null,firstDecodeTimestamp:void 0,lastDecodeTimestamp:-1,timeToSampleTable:[],compositionTimeOffsetTable:[],lastTimescaleUnits:null,lastSample:null,compactlyCodedChunkTable:[]}),i(this,h).audio.codec==="aac")){let e=m(this,Ue,tt).call(this,2,i(this,h).audio.sampleRate,i(this,h).audio.numberOfChannels);i(this,S).info.decoderConfig={codec:i(this,h).audio.codec,description:e,numberOfChannels:i(this,h).audio.numberOfChannels,sampleRate:i(this,h).audio.sampleRate}}},Ue=new WeakSet,tt=function(e,t,s){let a=[96e3,88200,64e3,48e3,44100,32e3,24e3,22050,16e3,12e3,11025,8e3,7350].indexOf(t),o=s,l="";l+=e.toString(2).padStart(5,"0"),l+=a.toString(2).padStart(4,"0"),a===15&&(l+=t.toString(2).padStart(24,"0")),l+=o.toString(2).padStart(4,"0");let u=Math.ceil(l.length/8)*8;l=l.padEnd(u,"0");let g=new Uint8Array(l.length/8);for(let b=0;b<l.length;b+=8)g[b/8]=parseInt(l.slice(b,b+8),2);return g},ue=new WeakSet,xe=function(e,t,s,r,a,o,l){let u=r/1e6,g=(r-(l??0))/1e6,b=a/1e6,U=m(this,We,it).call(this,u,g,e);return u=U.presentationTimestamp,g=U.decodeTimestamp,o?.decoderConfig&&(e.info.decoderConfig===null?e.info.decoderConfig=o.decoderConfig:Object.assign(e.info.decoderConfig,o.decoderConfig)),{presentationTimestamp:u,decodeTimestamp:g,duration:b,data:t,size:t.byteLength,type:s,timescaleUnitsToNextSample:O(b,e.timescale)}},M=new WeakSet,I=function(e,t){i(this,h).fastStart!=="fragmented"&&e.samples.push(t);const s=O(t.presentationTimestamp-t.decodeTimestamp,e.timescale);if(e.lastTimescaleUnits!==null){let a=O(t.decodeTimestamp,e.timescale,!1),o=Math.round(a-e.lastTimescaleUnits);if(e.lastTimescaleUnits+=o,e.lastSample.timescaleUnitsToNextSample=o,i(this,h).fastStart!=="fragmented"){let l=se(e.timeToSampleTable);l.sampleCount===1?(l.sampleDelta=o,l.sampleCount++):l.sampleDelta===o?l.sampleCount++:(l.sampleCount--,e.timeToSampleTable.push({sampleCount:2,sampleDelta:o}));const u=se(e.compositionTimeOffsetTable);u.sampleCompositionTimeOffset===s?u.sampleCount++:e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s})}}else e.lastTimescaleUnits=0,i(this,h).fastStart!=="fragmented"&&(e.timeToSampleTable.push({sampleCount:1,sampleDelta:O(t.duration,e.timescale)}),e.compositionTimeOffsetTable.push({sampleCount:1,sampleCompositionTimeOffset:s}));e.lastSample=t;let r=!1;if(!e.currentChunk)r=!0;else{let a=t.presentationTimestamp-e.currentChunk.startTimestamp;if(i(this,h).fastStart==="fragmented"){let o=i(this,T)??i(this,S);const l=i(this,h).minFragmentDuration??1;e===o&&t.type==="key"&&a>=l&&(r=!0,m(this,me,Fe).call(this))}else r=a>=.5}r&&(e.currentChunk&&m(this,ee,de).call(this,e),e.currentChunk={startTimestamp:t.presentationTimestamp,samples:[]}),e.currentChunk.samples.push(t)},We=new WeakSet,it=function(e,t,s){const r=i(this,h).firstTimestampBehavior==="strict",a=s.lastDecodeTimestamp===-1;if(r&&a&&t!==0)throw new Error(`The first chunk for your media track must have a timestamp of 0 (received DTS=${t}).Non-zero first timestamps are often caused by directly piping frames or audio data from a MediaStreamTrack into the encoder. Their timestamps are typically relative to the age of thedocument, which is probably what you want.
 
 If you want to offset all timestamps of a track such that the first one is zero, set firstTimestampBehavior: 'offset' in the options.
 `);if(i(this,h).firstTimestampBehavior==="offset"||i(this,h).firstTimestampBehavior==="cross-track-offset"){s.firstDecodeTimestamp===void 0&&(s.firstDecodeTimestamp=t);let l;i(this,h).firstTimestampBehavior==="offset"?l=s.firstDecodeTimestamp:l=Math.min(i(this,T)?.firstDecodeTimestamp??1/0,i(this,S)?.firstDecodeTimestamp??1/0),t-=l,e-=l}if(t<s.lastDecodeTimestamp)throw new Error(`Timestamps must be monotonically increasing (DTS went from ${s.lastDecodeTimestamp*1e6} to ${t*1e6}).`);return s.lastDecodeTimestamp=t,{presentationTimestamp:e,decodeTimestamp:t}},ee=new WeakSet,de=function(e){if(i(this,h).fastStart==="fragmented")throw new Error("Can't finalize individual chunks if 'fastStart' is set to 'fragmented'.");if(e.currentChunk){if(e.finalizedChunks.push(e.currentChunk),i(this,H).push(e.currentChunk),(e.compactlyCodedChunkTable.length===0||se(e.compactlyCodedChunkTable).samplesPerChunk!==e.currentChunk.samples.length)&&e.compactlyCodedChunkTable.push({firstChunk:e.finalizedChunks.length,samplesPerChunk:e.currentChunk.samples.length}),i(this,h).fastStart==="in-memory"){e.currentChunk.offset=0;return}e.currentChunk.offset=i(this,f).pos;for(let t of e.currentChunk.samples)i(this,f).write(t.data),t.data=null;m(this,q,te).call(this)}},me=new WeakSet,Fe=function(e=!0){if(i(this,h).fastStart!=="fragmented")throw new Error("Can't finalize a fragment unless 'fastStart' is set to 'fragmented'.");let t=[i(this,T),i(this,S)].filter(u=>u&&u.currentChunk);if(t.length===0)return;let s=ut(this,Oe)._++;if(s===1){let u=re(t,i(this,$),!0);i(this,f).writeBox(u)}let r=i(this,f).pos,a=$e(s,t);i(this,f).writeBox(a);{let u=Se(!1),g=0;for(let U of t)for(let ie of U.currentChunk.samples)g+=ie.size;let b=i(this,f).measureBox(u)+g;b>=4294967296&&(u.largeSize=!0,b=i(this,f).measureBox(u)+g),u.size=b,i(this,f).writeBox(u)}for(let u of t){u.currentChunk.offset=i(this,f).pos,u.currentChunk.moofOffset=r;for(let g of u.currentChunk.samples)i(this,f).write(g.data),g.data=null}let o=i(this,f).pos;i(this,f).seek(i(this,f).offsets.get(a));let l=$e(s,t);i(this,f).writeBox(l),i(this,f).seek(o);for(let u of t)u.finalizedChunks.push(u.currentChunk),i(this,H).push(u.currentChunk),u.currentChunk=null;e&&m(this,q,te).call(this)},q=new WeakSet,te=function(){i(this,f)instanceof ze&&i(this,f).flush()},pe=new WeakSet,Ne=function(){if(i(this,Y))throw new Error("Cannot add new video or audio chunks after the file has been finalized.")},ft(Re)})();typeof module=="object"&&typeof module.exports=="object"&&Object.assign(module.exports,Mp4Muxer);
+
 
 </script>
 <script>
@@ -685,6 +723,7 @@ J.fmtTime = (t, fps) => {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}${fps ? ':' + String(f).padStart(2, '0') : '.' + String(f).padStart(2, '0')}`;
 };
 
+
 /* ============================================================
    JIZURA — fonts: catalogue, loading, glyph decomposition
    ============================================================ */
@@ -775,26 +814,51 @@ J.metrics = {
    each can be flown, shattered or dropped independently. Works with any
    font the browser can render, including local and uploaded ones.        */
 class GlyphCache {
-  constructor() { this.map = new Map(); this.tint = new Map(); this.count = 0; this.maxRes = 512; }
-  clear() { this.map.clear(); this.tint.clear(); }
+  constructor() {
+    this.map = new Map(); this.tint = new Map(); this.maxRes = 512;
+    // RGBA backing-store estimates. Animated colors can produce a new tint on
+    // every frame, so both canvas bytes and entry counts must have a limit.
+    this.glyphBytes = 0; this.tintBytes = 0;
+    this.maxGlyphBytes = 64 * 1024 * 1024; this.maxTintBytes = 32 * 1024 * 1024;
+    this.maxGlyphEntries = 1800; this.maxTintEntries = 4096;
+  }
+  clear() { this.map.clear(); this.tint.clear(); this.glyphBytes = this.tintBytes = 0; }
   bucket(px) { let r = 64; while (r < px && r < this.maxRes) r *= 2; return r; }
   get(fontKey, ch, px) {
     const res = this.bucket(px);
     const key = fontKey + '|' + ch + '|' + res;
     let g = this.map.get(key);
-    if (!g) { g = decompose(fontKey, ch, res); this.map.set(key, g); if (this.map.size > 1800) this.evict(); }
+    if (g) { this.map.delete(key); this.map.set(key, g); return g; }
+    g = decompose(fontKey, ch, res);
+    g.cacheBytes = g.pieces.reduce((sum, piece) => sum + piece.cv.width * piece.cv.height * 4, 0);
+    if (g.cacheBytes <= this.maxGlyphBytes) {
+      this.map.set(key, g); this.glyphBytes += g.cacheBytes; this.evict();
+    }
     return g;
   }
-  evict() { let n = 0; for (const k of this.map.keys()) { this.map.delete(k); if (++n > 600) break; } this.tint.clear(); }
+  evict() {
+    while (this.map.size && (this.glyphBytes > this.maxGlyphBytes || this.map.size > this.maxGlyphEntries)) {
+      const key = this.map.keys().next().value;
+      this.glyphBytes -= this.map.get(key).cacheBytes; this.map.delete(key);
+    }
+    while (this.tint.size && (this.tintBytes > this.maxTintBytes || this.tint.size > this.maxTintEntries)) {
+      const key = this.tint.keys().next().value;
+      const canvas = this.tint.get(key);
+      this.tintBytes -= canvas.width * canvas.height * 4; this.tint.delete(key);
+    }
+    // Drop cache references only: a renderer may still be drawing a returned
+    // glyph or sprite during this frame. Resizing its canvas would erase it.
+  }
   sprite(piece, color) {              // tinted copy of a white piece sprite
     if (color === '#ffffff' || color === '#fff') return piece.cv;
-    let m = this.tint.get(piece.id);
-    if (!m) { m = new Map(); this.tint.set(piece.id, m); }
-    let c = m.get(color);
-    if (!c) {
-      c = document.createElement('canvas'); c.width = piece.cv.width; c.height = piece.cv.height;
-      const x = c.getContext('2d'); x.drawImage(piece.cv, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
-      m.set(color, c);
+    const key = piece.id + '|' + color;
+    let c = this.tint.get(key);
+    if (c) { this.tint.delete(key); this.tint.set(key, c); return c; }
+    c = document.createElement('canvas'); c.width = piece.cv.width; c.height = piece.cv.height;
+    const x = c.getContext('2d'); x.drawImage(piece.cv, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
+    const bytes = c.width * c.height * 4;
+    if (bytes <= this.maxTintBytes) {
+      this.tint.set(key, c); this.tintBytes += bytes; this.evict();
     }
     return c;
   }
@@ -917,6 +981,7 @@ function clipHalf(poly, nx, ny, d0, sgn) {
   return out;
 }
 })();
+
 
 /* ============================================================
    JIZURA — text items: layout + drawing (whole glyphs or pieces)
@@ -1173,6 +1238,7 @@ J.fitSize = (text, font, maxW, maxH, opt = {}) => {
 };
 })();
 
+
 /* ============================================================
    JIZURA — style packs (palettes, type roles, texture, tendencies)
    Each pack = a set of colour schemes the cuts can swap between,
@@ -1386,6 +1452,7 @@ J.resolveStyle = (project) => {
 };
 function pickDefined(o, keys) { const r = {}; for (const k of keys) if (o[k]) r[k] = o[k]; return r; }
 })();
+
 
 /* ============================================================
    JIZURA — motion recipes: entrances / holds / exits
@@ -1803,6 +1870,7 @@ J.combinePiece = (fns) => {
 };
 })();
 
+
 /* ============================================================
    JIZURA — registries for the newer expression groups + a single
    registration helper used by every expression pack (src/11p_*.js)
@@ -1872,6 +1940,7 @@ J.registerAll = (group, defs, pack) => { for (const k of Object.keys(defs)) J.re
 /* items whose tags include a mood key (used by おまかせ) */
 J.taggedWith = (group, mood) => J.order(group).filter(k => { const d = J.registry(group)[k]; return d && d.tags && d.tags.includes(mood); });
 })();
+
 
 /* ============================================================
    JIZURA — layouts (how a chunk of lyric is composed on screen)
@@ -2524,6 +2593,7 @@ J.HOLD_ORDER = ['still', 'jitter', 'drift', 'breathe', 'wave', 'glitchtick'];
 J.EXIT_ORDER = ['cut', 'explode', 'fall', 'drift', 'slice', 'wipe', 'shrink', 'blur', 'stretch', 'scatter', 'glitch'];
 })();
 
+
 /* ============================================================
    JIZURA — decor (graphic elements around / behind the lyric) + HUD
    ============================================================ */
@@ -2785,6 +2855,7 @@ J.drawHUD = (env, plan) => {
 };
 })();
 
+
 /* ============================================================
    JIZURA — planner: lyrics -> lines -> chunks -> timed cuts + events
    ============================================================ */
@@ -2805,7 +2876,7 @@ J.defaultProject = () => ({
   aspect: '16:9', res: 1080, fps: 24,
   fx: { motion: 0.7, glitch: 0.55, chroma: 0.7, decor: 0.5, density: 0.55, texture: 0.6, flash: true, onTwos: true, koma: 12, hud: 'auto', bgSwitch: 0.35 },
   enabled: Object.fromEntries(J.GROUP_KEYS.map(g => [g, Object.fromEntries(J.order(g).map(k => [k, true]))])),
-  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, lineScale: 1 },
+  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, autoTimes: {}, lineScale: 1 },
   overrides: {},
   colors: { enabled: false },
   fonts: {},
@@ -2917,13 +2988,16 @@ J.computeTiming = (project, parsed, audio) => {
   const lines = parsed.lines;
   const beat = T.bpm > 0 ? 60 / T.bpm : 0;
   const starts = [];
-  const allLrc = lines.length && lines.every(l => l.lrc != null);
+  const hasAutoTimes = lines.some((_, i) => T.autoTimes && T.autoTimes[i] != null && Number.isFinite(+T.autoTimes[i]));
   let t = T.offset ?? 0.4;
   lines.forEach((l, i) => {
     const man = T.lineTimes && T.lineTimes[i] != null ? +T.lineTimes[i] : null;
+    const auto = T.autoTimes && T.autoTimes[i] != null ? +T.autoTimes[i] : null;
     let s;
-    if (allLrc) s = l.lrc;
-    else if (man != null && isFinite(man)) s = man;
+    // An imported LRC timestamp is a starting point, and remains editable.
+    if (man != null && Number.isFinite(man)) s = man;
+    else if (l.lrc != null && Number.isFinite(+l.lrc)) s = +l.lrc;
+    else if (auto != null && Number.isFinite(auto)) s = auto;
     else {
       if (i > 0) {
         const n = [...lines[i - 1].text].length;
@@ -2935,14 +3009,17 @@ J.computeTiming = (project, parsed, audio) => {
     starts.push(s);
   });
   const ends = starts.map((s, i) => {
-    if (i < starts.length - 1) return Math.max(s + 0.35, starts[i + 1]);
+    // Closely spaced phrases must not keep the previous lyric over the next one.
+    if (i < starts.length - 1) return starts[i + 1] > s ? starts[i + 1] : s + 0.35;
+    if (hasAutoTimes && T.autoEnd != null && Number.isFinite(+T.autoEnd) && +T.autoEnd > s) return +T.autoEnd;
     const n = [...lines[i].text].length;
     let d = J.clamp(0.8 + n * 0.17, 1.5, 5.2) * (T.lineScale || 1);
     if (beat) d = Math.max(2, Math.round(d / beat)) * beat;
+    if (hasAutoTimes && audio && audio.duration > s) return Math.min(s + d, audio.duration);
     return s + d;
   });
   let duration = (ends.length ? ends[ends.length - 1] : 3) + (T.tail ?? 0.9);
-  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + 0.2 : 1);
+  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + (hasAutoTimes ? 0 : 0.2) : 1);
   return { starts, ends, duration };
 };
 
@@ -3251,6 +3328,7 @@ J.outputSize = (project) => {
 };
 })();
 
+
 /* ============================================================
    JIZURA — おまかせ (randomise everything into a coherent mood)
    Each call rolls a mood, a style, effect strengths, a technique
@@ -3347,6 +3425,7 @@ J.omakase = (project, rnd = Math.random, opts = {}) => {
   return { mood, style, fx, enabled, fonts, colors, overrides, seed: Math.floor(rnd() * 1e9) };
 };
 })();
+
 
 /* ============================================================
    JIZURA — frame renderer: background, chroma passes, HUD, post FX
@@ -3703,6 +3782,7 @@ function prevBeat(beats, t) {
 J.Renderer = Renderer;
 })();
 
+
 /* ============================================================
    JIZURA — audio: decode, energy envelope, onset, BPM & beat grid
    ============================================================ */
@@ -3785,6 +3865,122 @@ J.beatGrid = (bpm, offset, duration) => {
 };
 })();
 
+
+/* Rough lyric placement, entirely in the browser. This is not speech recognition:
+   text length supplies pacing; the energy envelope and beat grid suggest boundaries. */
+(() => {
+'use strict';
+
+// Suggest the audible region, not the vocal region. Ignore brief noise spikes and
+// retain a small pad so an attack at the edge is not cut off.
+J.suggestLyricRange = audio => {
+  const duration = Number(audio && audio.duration);
+  if (!(duration > 0) || !Number.isFinite(duration)) return { start: 0, end: 0 };
+  const energy = audio.energy || [], rate = Number(audio.energyRate) || 50;
+  const runLength = Math.max(1, Math.ceil(rate * 0.06));
+  let run = 0, first = -1, last = -1;
+  for (let i = 0; i < energy.length; i++) {
+    run = energy[i] > 0.02 ? run + 1 : 0;
+    if (run >= runLength) {
+      if (first < 0) first = i - runLength + 1;
+      last = i;
+    }
+  }
+  if (first < 0) return { start: 0, end: duration };
+  const start = Math.max(0, first / rate - 0.1);
+  const end = Math.min(duration, (last + 1) / rate + 0.1);
+  return end > start ? { start, end } : { start: 0, end: duration };
+};
+
+J.autoLyricTimes = (lines, audio, options = {}) => {
+  const duration = Number(audio && audio.duration);
+  if (!(duration > 0) || !Number.isFinite(duration)) throw new Error('先に曲を読み込んでください。');
+  const start = options.start == null ? 0 : Number(options.start);
+  const end = options.end == null ? duration : Number(options.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > duration || end <= start) {
+    throw new Error('歌い始めと歌い終わりを、曲の範囲内で指定してください。');
+  }
+  if (!lines.length) return {};
+  const n = lines.length, anchors = options.anchors || {}, fixed = [];
+  for (let i = 0; i < n; i++) {
+    const value = anchors[i] != null ? anchors[i] : lines[i].lrc;
+    if (value == null) continue;
+    const t = Number(value);
+    if (!Number.isFinite(t) || t < start || t >= end) {
+      throw new Error(`${i + 1}行目の確定時刻が歌唱範囲外です。時刻か歌唱範囲を調整してください。`);
+    }
+    if (fixed.length && t <= fixed[fixed.length - 1].time) {
+      throw new Error('確定済みの歌詞の時刻が前後しています。先に行の開始秒を調整してください。');
+    }
+    fixed.push({ index: i, time: t });
+  }
+  if (!fixed.length || fixed[0].index !== 0) {
+    if (fixed.length && fixed[0].time <= start) throw new Error('歌い始めを、確定済みの行より前にしてください。');
+    fixed.unshift({ index: 0, time: start });
+  }
+  fixed.push({ index: n, time: end });
+
+  const energy = audio.energy || [], rate = Number(audio.energyRate) || 50;
+  const energyAt = t => {
+    const value = energy[Math.floor(t * rate)];
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+  };
+  // Ignore artificial beat grids from silent audio (the tempo analyser still returns a grid).
+  const hasEnergy = Array.from(energy).some(v => Number.isFinite(v) && v > 0.01);
+  const beats = hasEnergy ? (audio.beats || []).filter(t => Number.isFinite(t) && t >= start && t < end).sort((a, b) => a - b) : [];
+  const weights = lines.map(line => {
+    const count = Array.from(String(line.text || '').replace(/\s|[、。,.!?！？]/g, '')).length;
+    return 0.8 + Math.sqrt(Math.max(1, count));
+  });
+  const times = {};
+  for (let s = 0; s < fixed.length - 1; s++) {
+    const left = fixed[s], right = fixed[s + 1];
+    const count = right.index - left.index, span = right.time - left.time;
+    times[left.index] = left.time;
+    if (count === 1) continue;
+    // Build an activity clock. A nonzero floor lets long quiet passages retain time,
+    // while a modest energy contribution avoids assigning most lyrics to silence.
+    const bins = Math.max(1, Math.min(20000, Math.ceil(span * 50)));
+    const cumulative = [0];
+    for (let k = 0; k < bins; k++) {
+      cumulative.push(cumulative[k] + 0.65 + 0.35 * energyAt(left.time + (k + 0.5) / bins * span));
+    }
+    const intervals = [];
+    for (let i = left.index; i < right.index; i++) {
+      intervals.push(weights[i] + (i + 1 < n && lines[i + 1].gapBefore ? 1 : 0));
+    }
+    const totalWeight = intervals.reduce((a, b) => a + b, 0);
+    const minGap = Math.min(0.1, span / count / 4);
+    let usedWeight = 0, cursor = 0;
+    for (let i = left.index + 1; i < right.index; i++) {
+      usedWeight += intervals[i - left.index - 1];
+      const target = cumulative[bins] * usedWeight / totalWeight;
+      while (cursor + 1 < bins && cumulative[cursor + 1] < target) cursor++;
+      const fraction = (target - cumulative[cursor]) / (cumulative[cursor + 1] - cumulative[cursor]);
+      const ideal = left.time + (cursor + fraction) / bins * span;
+      const low = times[i - 1] + minGap, high = right.time - (right.index - i) * minGap;
+      const radius = Math.min(0.65, span / count * 0.18);
+      let bestTime = Math.max(low, Math.min(high, ideal)), bestScore = -Infinity;
+      // A quiet boundary or a beat may shift the estimate slightly, never a whole phrase.
+      const candidates = [{ time: bestTime, beat: false }];
+      if (hasEnergy) {
+        for (let k = -4; k <= 4; k++) candidates.push({ time: ideal + radius * k / 4, beat: false });
+        for (const beat of beats) if (Math.abs(beat - ideal) <= radius) candidates.push({ time: beat, beat: true });
+      }
+      for (const candidate of candidates) {
+        const t = candidate.time;
+        if (t < low || t > high) continue;
+        const proximity = radius > 0 ? Math.abs(t - ideal) / radius : 0;
+        const score = -proximity + (hasEnergy ? (1 - energyAt(t)) * 0.3 : 0) + (candidate.beat ? 0.35 : 0);
+        if (score > bestScore) { bestScore = score; bestTime = t; }
+      }
+      times[i] = bestTime;
+    }
+  }
+  return times;
+};
+})();
+
 /* ============================================================
    JIZURA — export: MP4 (WebCodecs + mp4-muxer), PNG sequence ZIP,
    file saving (artifact download capability or plain browser download)
@@ -3793,6 +3989,14 @@ J.beatGrid = (bpm, offset, duration) => {
 'use strict';
 
 /* ---------- saving ---------- */
+// Keep this object alive while a visible download link is offered. A real user
+// click can save the completed export even when an automatic download is blocked.
+J.prepareDownload = (filename, data) => {
+  const blob = data instanceof Blob ? data : new Blob([data]);
+  const url = URL.createObjectURL(blob);
+  let disposed = false;
+  return { filename, blob, url, dispose() { if (!disposed) { URL.revokeObjectURL(url); disposed = true; } } };
+};
 J.saveFile = async (filename, data) => {
   const blob = data instanceof Blob ? data : new Blob([data]);
   try {
@@ -3804,11 +4008,12 @@ J.saveFile = async (filename, data) => {
     if (e && e.code === 'declined') return 'declined';
     if (e && e.code && e.code !== 'unavailable' && e.code !== 'not_granted') throw e;
   }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
-  return 'saved';
+  const download = J.prepareDownload(filename, blob);
+  const a = document.createElement('a'); a.href = download.url; a.download = filename;
+  document.body.appendChild(a);
+  try { a.click(); } finally { a.remove(); setTimeout(() => download.dispose(), 60000); }
+  // Browsers do not expose whether a download was accepted or saved to disk.
+  return 'initiated';
 };
 
 /* ---------- codec negotiation ---------- */
@@ -3822,7 +4027,7 @@ J.pickVideoCodec = async (w, h, fps, bitrate) => {
     { codec: 'av01.0.12M.08', mux: 'av1', label: 'AV1' },
   ];
   for (const c of cands) {
-    const cfg = { codec: c.codec, width: w, height: h, bitrate, framerate: fps };
+    const cfg = { codec: c.codec, width: w, height: h, bitrate, framerate: fps, latencyMode: 'quality' };
     if (c.mux === 'avc') cfg.avc = { format: 'avc' };
     try { const s = await VideoEncoder.isConfigSupported(cfg); if (s.supported) return Object.assign({}, c, { cfg }); } catch (e) {}
   }
@@ -3836,72 +4041,132 @@ J.pickAudioCodec = async (sr, chn) => {
   return null;
 };
 
-async function resample(buffer, sr, duration) {
+async function resample(buffer, sr, offset, length) {
   const chn = Math.min(2, buffer.numberOfChannels);
-  const len = Math.ceil(duration * sr);
-  const oc = new OfflineAudioContext(chn, len, sr);
-  const src = oc.createBufferSource(); src.buffer = buffer; src.connect(oc.destination); src.start(0);
+  const oc = new OfflineAudioContext(chn, length, sr);
+  const src = oc.createBufferSource(); src.buffer = buffer; src.connect(oc.destination);
+  if (offset < buffer.duration) src.start(0, offset);
   return oc.startRendering();
 }
 
 /* ---------- MP4 ---------- */
+// The whole MP4 still lives in browser memory. Keep the encoded output bounded,
+// leaving room for the muxer's growing buffer, Blob copy, images and decoded song.
+const MP4_MAX_BYTES = 256 * 1024 * 1024;
+J.exportBitrate = (w, h, fps, quality = 'high') => {
+  const pixels = w * h;
+  const rates = pixels <= 1280 * 720 ? [4, 6, 10] : pixels <= 1920 * 1080 ? [6, 10, 16] : pixels <= 2560 * 1440 ? [10, 16, 24] : [16, 28, 40];
+  return rates[quality === 'max' ? 2 : quality === 'high' ? 1 : 0] * (fps > 30 ? 1.5 : 1) * 1e6;
+};
+const memoryError = () => new Error('MP4の容量が大きすぎます。解像度を720p、fpsを24または30、画質を標準に下げて再試行してください。');
 J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signal }) => {
   const [w, h] = J.outputSize(project);
   const fps = plan.fps;
-  const px = w * h * fps;
-  const bitrate = Math.round(px * (quality === 'max' ? 0.42 : quality === 'high' ? 0.28 : 0.16));
+  const bitrate = J.exportBitrate(w, h, fps, quality);
+  const wantsAudio = audio && audio.buffer && project.includeAudio !== false;
+  if (!Number.isFinite(plan.duration) || plan.duration <= 0) throw new Error('動画の長さを確認してください。');
+  if ((bitrate + (wantsAudio ? 192000 : 0)) * plan.duration / 8 * 1.05 > MP4_MAX_BYTES) throw memoryError();
   const vc = await J.pickVideoCodec(w, h, fps, bitrate);
   if (!vc) throw new Error('このブラウザは動画エンコード（WebCodecs）に対応していません。Chrome か Edge の最新版で開いてください。');
   let ac = null;
-  if (audio && audio.buffer && project.includeAudio !== false) ac = await J.pickAudioCodec(48000, Math.min(2, audio.buffer.numberOfChannels));
+  if (wantsAudio) {
+    ac = await J.pickAudioCodec(48000, Math.min(2, audio.buffer.numberOfChannels));
+    if (!ac || typeof AudioData === 'undefined') throw new Error('このブラウザでは音声付きMP4を書き出せません。Chrome / Edgeで開くか、「曲を含める」をOFFにしてください。');
+  }
   const target = new Mp4Muxer.ArrayBufferTarget();
-  const muxOpts = { target, video: { codec: vc.mux, width: w, height: h, frameRate: fps }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' };
+  // A local download can keep its metadata at the end. Unlike in-memory fast
+  // start, this writes/relinquishes chunks as they arrive instead of retaining
+  // a second full set of encoded samples until finalization.
+  const muxOpts = { target, video: { codec: vc.mux, width: w, height: h, frameRate: fps }, fastStart: false, firstTimestampBehavior: 'offset' };
   if (ac) muxOpts.audio = { codec: ac.mux, numberOfChannels: Math.min(2, audio.buffer.numberOfChannels), sampleRate: ac.sr };
   const muxer = new Mp4Muxer.Muxer(muxOpts);
-  let err = null;
-  const venc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { err = e; } });
-  venc.configure(Object.assign({}, vc.cfg, { latencyMode: 'quality' }));
-  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d', { alpha: false });
-  const R = new J.Renderer();
-  const total = Math.max(1, Math.round(plan.duration * fps));
-  const scale = w / plan.W;
-  const prevRes = J.glyphs.maxRes; J.glyphs.maxRes = h >= 1000 ? 768 : 512;
-  try {
-  for (let i = 0; i < total; i++) {
-    if (signal && signal.aborted) { try { venc.close(); } catch (e) {} throw new Error('キャンセルしました'); }
+  let err = null, venc = null, aenc = null, encodedBytes = 0;
+  const check = () => {
+    if (signal && signal.aborted) throw new Error('キャンセルしました');
     if (err) throw err;
-    if (plan.photo && plan.photo.on) await J.photo.ready(plan, i / fps);
-    R.frame(ctx, plan, i / fps, { scale });
-    const vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
-    venc.encode(vf, { keyFrame: i % (fps * 2) === 0 });
-    vf.close();
-    while (venc.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 2));
-    if (i % 3 === 0) { onProgress && onProgress(i / total, `フレーム ${i + 1}/${total}`); await new Promise(r => setTimeout(r, 0)); }
-  }
-  } finally { J.glyphs.maxRes = prevRes; }
-  await venc.flush(); venc.close();
-  if (ac) {
-    onProgress && onProgress(0.99, '音声をエンコード中');
-    const rs = await resample(audio.buffer, ac.sr, plan.duration);
-    const chn = rs.numberOfChannels;
-    const aenc = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: e => { err = e; } });
-    aenc.configure({ codec: ac.codec, sampleRate: ac.sr, numberOfChannels: chn, bitrate: 192000 });
-    const frames = rs.length, block = 4800;
-    for (let off = 0; off < frames; off += block) {
-      const n = Math.min(block, frames - off);
-      const data = new Float32Array(n * chn);
-      for (let c = 0; c < chn; c++) data.set(rs.getChannelData(c).subarray(off, off + n), c * n);
-      const ad = new AudioData({ format: 'f32-planar', sampleRate: ac.sr, numberOfFrames: n, numberOfChannels: chn, timestamp: Math.round(off * 1e6 / ac.sr), data });
-      aenc.encode(ad); ad.close();
-      if (aenc.encodeQueueSize > 16) await new Promise(r => setTimeout(r, 1));
+  };
+  const close = encoder => { if (encoder && encoder.state !== 'closed') { try { encoder.close(); } catch (e) {} } };
+  const abort = () => { close(venc); close(aenc); };
+  const output = add => (chunk, meta) => {
+    if (err) return;
+    try {
+      encodedBytes += chunk.byteLength || 0;
+      if (encodedBytes > MP4_MAX_BYTES) throw memoryError();
+      add(chunk, meta);
+    } catch (e) { err = e; }
+  };
+  const drain = async (encoder, limit) => {
+    while (encoder.encodeQueueSize > limit) {
+      check();
+      await new Promise(r => setTimeout(r, 2));
     }
-    await aenc.flush(); aenc.close();
-    if (err) throw err;
+    check();
+  };
+  const prevRes = J.glyphs.maxRes;
+  if (signal) signal.addEventListener('abort', abort);
+  try {
+    check();
+    venc = new VideoEncoder({ output: output((chunk, meta) => muxer.addVideoChunk(chunk, meta)), error: e => { err = e; } });
+    venc.configure(vc.cfg);
+    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('描画領域を作成できません。解像度を下げて再試行してください。');
+    const R = new J.Renderer();
+    const total = Math.max(1, Math.round(plan.duration * fps));
+    const scale = w / plan.W;
+    J.glyphs.maxRes = h >= 1000 ? 768 : 512;
+    for (let i = 0; i < total; i++) {
+      check();
+      if (plan.photo && plan.photo.on) await J.photo.ready(plan, i / fps);
+      check();
+      R.frame(ctx, plan, i / fps, { scale });
+      const vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      try { venc.encode(vf, { keyFrame: i % (fps * 2) === 0 }); } finally { vf.close(); }
+      await drain(venc, 4);
+      if (i % 3 === 0) { onProgress && onProgress(0.95 * i / total, `フレーム ${i + 1}/${total}`); await new Promise(r => setTimeout(r, 0)); }
+    }
+    await venc.flush();
+    check(); close(venc);
+    if (ac) {
+      onProgress && onProgress(0.95, '音声をエンコード中');
+      const chn = Math.min(2, audio.buffer.numberOfChannels);
+      aenc = new AudioEncoder({ output: output((chunk, meta) => muxer.addAudioChunk(chunk, meta)), error: e => { err = e; } });
+      aenc.configure({ codec: ac.codec, sampleRate: ac.sr, numberOfChannels: chn, bitrate: 192000 });
+      const frames = Math.ceil(plan.duration * ac.sr), block = 4800, windowFrames = ac.sr * 5;
+      for (let windowStart = 0; windowStart < frames; windowStart += windowFrames) {
+        check();
+        const rs = await resample(audio.buffer, ac.sr, windowStart / ac.sr, Math.min(windowFrames, frames - windowStart));
+        check();
+        for (let off = 0; off < rs.length; off += block) {
+          check();
+          const n = Math.min(block, rs.length - off);
+          const data = new Float32Array(n * chn);
+          for (let c = 0; c < chn; c++) data.set(rs.getChannelData(c).subarray(off, off + n), c * n);
+          const ad = new AudioData({ format: 'f32-planar', sampleRate: ac.sr, numberOfFrames: n, numberOfChannels: chn, timestamp: Math.round((windowStart + off) * 1e6 / ac.sr), data });
+          try { aenc.encode(ad); } finally { ad.close(); }
+          await drain(aenc, 16);
+          if (off % (block * 16) === 0) {
+            onProgress && onProgress(0.95 + 0.04 * (windowStart + off) / frames, '音声をエンコード中');
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+      }
+      await aenc.flush();
+      check(); close(aenc);
+    }
+    check();
+    onProgress && onProgress(0.99, 'MP4を仕上げています');
+    muxer.finalize();
+    onProgress && onProgress(1, '完了');
+    return { blob: new Blob([target.buffer], { type: 'video/mp4' }), codec: vc.label, audio: ac ? ac.mux : null, width: w, height: h };
+  } catch (e) {
+    check();
+    throw e;
+  } finally {
+    close(venc); close(aenc);
+    J.glyphs.maxRes = prevRes;
+    if (signal) signal.removeEventListener('abort', abort);
   }
-  muxer.finalize();
-  onProgress && onProgress(1, '完了');
-  return { blob: new Blob([target.buffer], { type: 'video/mp4' }), codec: vc.label, audio: ac ? ac.mux : null, width: w, height: h };
 };
 
 /* ---------- PNG sequence as ZIP (store, no compression) ---------- */
@@ -3944,6 +4209,8 @@ J.exportPNGZip = async ({ plan, project, transparent, onProgress, signal, every 
     if (plan.photo && plan.photo.on && !transparent) await J.photo.ready(plan, i / fps); // 透過PNGには写真を出さないので待たない
     R.frame(ctx, plan, i / fps, { scale, transparent });
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    if (signal && signal.aborted) throw new Error('キャンセルしました');
+    if (!blob) throw new Error('PNGを作成できません。解像度を下げて再試行してください。');
     zip.add(`jizura_${String(i).padStart(5, '0')}.png`, new Uint8Array(await blob.arrayBuffer()));
     onProgress && onProgress(i / total, `PNG ${i + 1}/${total}`);
   }
@@ -3986,6 +4253,7 @@ J.planForAE = (plan, project) => {
   return clean;
 };
 })();
+
 
 /* JIZURA pack: decor — 45 refined graphic accents: HUD / measuring marks, geometry, particles & light, hand-drawn marks, type ornaments */
 (() => {
@@ -5669,6 +5937,7 @@ DEF.seal = {
 for (const k of Object.keys(DEF)) J.register('decor', k, DEF[k], PK);
 })();
 
+
 /* JIZURA pack: enter — 40 extra entrances (glyph masks, flips, squash & stretch, graphic wipes, glitch, neon, stamps) */
 (() => {
 'use strict';
@@ -6538,6 +6807,7 @@ const DEFS = {
 
 for (const k of Object.keys(DEFS)) J.register('enter', k, DEFS[k], P);
 })();
+
 
 /* JIZURA pack: exitHold — 36 exits (退場) + 20 holds (待機中の動き)
    Exits:  p 0 (rest) → 1 (fully gone).   Holds: amt 0..1 × fx.motion, subtle idle motion.
@@ -7642,6 +7912,7 @@ H.echoTrail = {
 
 for (const k of Object.keys(H)) J.register('hold', k, H[k], P);
 })();
+
 
 /* JIZURA pack: layoutsA — 28 compositional layouts: telops, editorial typesetting, graphic devices and UI mock-ups */
 (() => {
@@ -9536,6 +9807,7 @@ reg('ticket', {
 });
 
 })();
+
 
 /* JIZURA pack: layoutsB — kinetic / typographic layouts (rain, hanging, orbit, tunnel, word cloud, mechanical reveals …) */
 (() => {
@@ -11449,6 +11721,7 @@ J.register('layout', 'tape', {
 
 })();
 
+
 /* JIZURA pack: looks — text treatments, background graphics, camera moves and post / transition effects */
 (() => {
 'use strict';
@@ -12739,6 +13012,7 @@ fxReg('splitSlide', { name: '上下スライド', tags: ['graphic', 'pop', 'glit
   } });
 })();
 
+
 /* JIZURA pack: vocalo — ニコニコ動画/ボカロ曲PV風の演出（弾幕コメント・高速点滅・ドット化） */
 (() => {
 'use strict';
@@ -12959,6 +13233,7 @@ fxReg('pixelate', {
   },
 });
 })();
+
 
 /* ============================================================
    JIZURA — 写真PV: IndexedDB保存・ビットマップLRUキャッシュ・
@@ -13232,6 +13507,7 @@ J.photoNotify = null;
 J.photoOnLoad = null;
 })();
 
+
 /* ============================================================
    JIZURA — editor UI
    ============================================================ */
@@ -13240,6 +13516,7 @@ J.photoOnLoad = null;
 if (!document.getElementById('app')) return;          // engine-only pages (tests)
 const $ = id => document.getElementById(id);
 const LS_KEY = 'jizura.project.v1';
+const RECOVERY_KEY = LS_KEY + '.recovery';
 const HUD_CHARS = '0123456789:./-_()【】・No.LYRICRECUNTITLEDXYlinebpminterlude—─／ ';
 const ICON = {
   dice: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1" fill="currentColor"/><circle cx="10.5" cy="10.5" r="1" fill="currentColor"/><circle cx="10.5" cy="5.5" r="1" fill="currentColor"/><circle cx="5.5" cy="10.5" r="1" fill="currentColor"/></svg>',
@@ -13286,9 +13563,40 @@ async function reconcilePhotos() {
   const { ids: kept, missing } = await J.photo.filterExisting(ids);
   if (missing) { S.project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
 }
-function loadLocal() { try { const s = localStorage.getItem(LS_KEY); if (s) return mergeProject(JSON.parse(s)); } catch (e) {} return mergeProject(null); }
+function loadLocal() {
+  for (const key of [LS_KEY, RECOVERY_KEY]) {
+    try {
+      const raw = localStorage.getItem(key); if (!raw) continue;
+      const p = JSON.parse(raw);
+      if (!p || typeof p !== 'object' || typeof p.lyrics !== 'string') continue;
+      return mergeProject(p);
+    } catch (e) {}
+  }
+  return mergeProject(null);
+}
 let saveTimer = 0;
-function autosave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(S.project)); } catch (e) {} }, 700); }
+function saveNow(recovery = false) {
+  clearTimeout(saveTimer);
+  const json = JSON.stringify(S.project);
+  try {
+    localStorage.setItem(LS_KEY, json);
+    if (recovery) localStorage.setItem(RECOVERY_KEY, json);
+    return true;
+  } catch (e) {
+    toast('ブラウザに編集を保存できません。「編集データを保存」でバックアップしてください。');
+    return false;
+  }
+}
+function autosave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveNow(), 700); }
+let recoveryDownload = null;
+function prepareRecovery() {
+  saveNow(true);
+  if (recoveryDownload) recoveryDownload.dispose();
+  recoveryDownload = J.prepareDownload(baseName() + '.jizura.json', new Blob([JSON.stringify(S.project, null, 1)], { type: 'application/json' }));
+  $('recoveryLink').href = recoveryDownload.url;
+  $('recoveryLink').download = recoveryDownload.filename;
+  $('exportRecovery').hidden = false;
+}
 
 /* ---------------- planning ---------------- */
 function audioLike() {
@@ -13475,9 +13783,15 @@ function renderLines() {
     const o = ov[i] || {};
     const li = document.createElement('li'); li.className = 'ln';
     const manual = S.project.timing.lineTimes && S.project.timing.lineTimes[i] != null;
+    const automatic = S.project.timing.autoTimes && S.project.timing.autoTimes[i] != null;
     li.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span>
-      <input class="time mono" type="number" step="0.01" min="0" value="${ln.start.toFixed(2)}" title="開始（秒）${manual ? '・手動' : '・自動'}" aria-label="${i + 1}行目の開始秒" style="${manual ? 'border-color:var(--cyan)' : ''}">
+      <input class="time mono" type="number" step="0.01" min="0" value="${ln.start.toFixed(2)}" title="開始（秒）${manual ? '・手修整' : automatic ? '・仮配置' : '・自動'}" aria-label="${i + 1}行目の開始秒" style="${manual ? 'border-color:var(--cyan)' : ''}">
       <span class="txt" title="${escapeHtml(ln.text)}">${escapeHtml(ln.text)}</span>
+      <div class="timing-tools">
+        <button class="ghost small earlier" aria-label="${i + 1}行目を0.1秒早める">−0.1秒</button>
+        <button class="ghost small later" aria-label="${i + 1}行目を0.1秒遅らせる">＋0.1秒</button>
+        <button class="ghost small set-now" title="この行の開始を現在の再生位置に合わせる">今の位置</button>
+      </div>
       <div class="meta"><span class="cuts"></span>
       <span class="tools">
         <select aria-label="レイアウト指定">${layoutOpts}</select>
@@ -13487,10 +13801,11 @@ function renderLines() {
     li.querySelector('select').value = o.layout || '';
     li.querySelector('.time').addEventListener('change', e => {
       const v = parseFloat(e.target.value);
-      if (!S.project.timing.lineTimes) S.project.timing.lineTimes = {};
-      if (isFinite(v)) S.project.timing.lineTimes[i] = Math.max(0, v); else delete S.project.timing.lineTimes[i];
-      replan();
+      setLineTime(i, v);
     });
+    li.querySelector('.earlier').addEventListener('click', () => setLineTime(i, ln.start - 0.1));
+    li.querySelector('.later').addEventListener('click', () => setLineTime(i, ln.start + 0.1));
+    li.querySelector('.set-now').addEventListener('click', () => setLineTime(i, S.audio && S.playing ? AP.time() : S.t));
     li.querySelector('.txt').addEventListener('click', () => seek(ln.start + 0.001));
     li.querySelector('select').addEventListener('change', e => { setOv(i, { layout: e.target.value || undefined }); replan(); });
     li.querySelector('.dice').addEventListener('click', () => { const cur = ov[i] || {}; setOv(i, { seed: (cur.seed | 0) + 1, lock: false }); replan(); seek(ln.start + 0.001); });
@@ -13836,9 +14151,29 @@ async function codecNote() {
 }
 const EXP_BTNS = ['btnMP4', 'btnPNG', 'btnPNGA', 'eMP4'];
 function baseName() { return ((S.project.title || 'jizura').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'jizura'); }
+let lastDownload = null;
+function showDownload(filename, blob) {
+  const result = J.prepareDownload(filename, blob);
+  if (lastDownload) lastDownload.dispose();
+  lastDownload = result;
+  $('downloadLink').href = result.url; $('downloadLink').download = filename;
+  $('downloadOpen').href = result.url;
+  $('downloadName').textContent = `${filename}（${(blob.size / 1048576).toFixed(1)}MB）`;
+  $('downloadResult').hidden = false;
+}
+async function offerDownload(filename, blob) {
+  showDownload(filename, blob);
+  toast('書き出しが完了しました。「ダウンロード」を押して保存してください。');
+}
 async function runExport(kind) {
   if (S.exporting) return;
   pause();
+  if (S.tap) stopTap();
+  prepareRecovery();
+  // Release the previous video before allocating another export.
+  if (lastDownload) { lastDownload.dispose(); lastDownload = null; }
+  $('downloadLink').removeAttribute('href'); $('downloadOpen').removeAttribute('href');
+  $('downloadResult').hidden = true;
   const ac = new AbortController(); S.exporting = ac;
   const boxes = [...document.querySelectorAll('.exp-box')];
   const setText = m => boxes.forEach(b => { b.querySelector('.exp-text').textContent = m; });
@@ -13853,12 +14188,12 @@ async function runExport(kind) {
     if (kind === 'mp4') {
       const r = await J.exportMP4({ plan: S.plan, project: S.project, audio: S.project.includeAudio !== false ? S.audio : null, quality: S.project.quality || 'high', onProgress, signal: ac.signal });
       txt.textContent = `完成 ${(r.blob.size / 1048576).toFixed(1)}MB・${r.codec}${r.audio ? ' + ' + r.audio.toUpperCase() : ''}・${((performance.now() - t0) / 1000).toFixed(0)}秒`;
-      const res = await J.saveFile(baseName() + '.mp4', r.blob);
-      if (res === 'declined') txt.textContent += '（保存はキャンセルされました）';
+      await offerDownload(baseName() + '.mp4', r.blob);
+      txt.textContent += '・ダウンロードを押して保存';
     } else {
       const blob = await J.exportPNGZip({ plan: S.plan, project: S.project, transparent: kind === 'pnga', onProgress, signal: ac.signal });
       txt.textContent = `完成 ${(blob.size / 1048576).toFixed(1)}MB`;
-      await J.saveFile(baseName() + (kind === 'pnga' ? '_alpha' : '') + '_png.zip', blob);
+      await offerDownload(baseName() + (kind === 'pnga' ? '_alpha' : '') + '_png.zip', blob);
     }
   } catch (e) {
     txt.textContent = 'エラー: ' + (e && e.message ? e.message : e);
@@ -13870,23 +14205,127 @@ async function runExport(kind) {
   }
 }
 
+/* ---------------- automatic draft timing + manual correction ---------------- */
+let timingUndo = null;
+function rememberTiming() {
+  timingUndo = JSON.parse(JSON.stringify(S.project.timing));
+  $('btnUndoTiming').disabled = false;
+}
+function setLineTime(i, value) {
+  if (S.exporting) return;
+  if (S.tap) { $('timingStatus').textContent = 'タップ同期を終了してから行を修整してください。'; return; }
+  if (Number.isFinite(value)) value = +value.toFixed(3);
+  const previous = i > 0 ? S.plan.lines[i - 1].start : -0.01;
+  const next = i + 1 < S.plan.lines.length ? S.plan.lines[i + 1].start : (S.project.timing.autoEnd ?? S.audio?.duration ?? Infinity);
+  const times = Object.assign({}, S.project.timing.lineTimes);
+  if (Number.isFinite(value)) times[i] = value; else delete times[i];
+  const candidate = Object.assign({}, S.project, { timing: Object.assign({}, S.project.timing, { lineTimes: times }) });
+  const actual = J.computeTiming(candidate, J.parseLyrics(S.project.lyrics), audioLike()).starts[i];
+  if (!Number.isFinite(actual) || actual < 0 || actual <= previous || actual >= next) {
+    $('timingStatus').textContent = '開始秒は前の行より後、次の行（または歌い終わり）より前にしてください。';
+    renderLines(); return;
+  }
+  rememberTiming();
+  S.project.timing.lineTimes = times;
+  $('timingStatus').textContent = `${i + 1}行目のタイミングを更新しました。`;
+  replan();
+}
+function updateLyrics(raw) {
+  const oldLines = J.parseLyrics(S.project.lyrics).lines, newLines = J.parseLyrics(raw).lines;
+  const signature = lines => JSON.stringify(lines.map(l => [l.text, l.lrc, l.gapBefore]));
+  if (signature(oldLines) !== signature(newLines)) {
+    if (S.tap) { S.tap = null; pause(); $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false'); }
+    const oldTimes = S.project.timing.lineTimes || {}, mapped = {};
+    const oldIndices = new Map(), newIndices = new Map();
+    oldLines.forEach((l, i) => oldIndices.set(l.text, [...(oldIndices.get(l.text) || []), i]));
+    newLines.forEach((l, i) => newIndices.set(l.text, [...(newIndices.get(l.text) || []), i]));
+    newLines.forEach((line, i) => {
+      const oldMatches = oldIndices.get(line.text) || [], newMatches = newIndices.get(line.text) || [];
+      let oldIndex = oldMatches.length === 1 && newMatches.length === 1 ? oldMatches[0] : -1;
+      // With the same row count, preserve a correction when editing that row's words.
+      // Existing matching rows take priority, so inserted or reordered rows are not misassigned.
+      if (oldIndex < 0 && oldLines.length === newLines.length &&
+          (oldLines[i].text === line.text || (!oldMatches.length && !newIndices.has(oldLines[i].text)))) oldIndex = i;
+      if (oldIndex >= 0 && oldTimes[oldIndex] != null) mapped[i] = oldTimes[oldIndex];
+    });
+    // A reordering can make old anchors contradict the new order. Keep only compatible ones.
+    let previous = -1;
+    for (let i = 0; i < newLines.length; i++) {
+      const value = mapped[i] != null ? +mapped[i] : newLines[i].lrc;
+      if (value == null) continue;
+      if (!Number.isFinite(value) || value <= previous) delete mapped[i];
+      else previous = value;
+    }
+    S.project.timing.lineTimes = mapped;
+    S.project.timing.autoTimes = {};
+    timingUndo = null; $('btnUndoTiming').disabled = true;
+    $('timingStatus').textContent = (oldLines.length !== newLines.length ? '行数が変わりました。対応する行の手修整を引き継ぎました。' : '歌詞を変更しました。対応する行の手修整を保ちました。') +
+      (S.audio ? '「曲に合わせて仮配置」で再配置してください。' : '曲を読み込んで仮配置してください。');
+  }
+  S.project.lyrics = raw;
+  replanSoon(260);
+}
+function autoTiming() {
+  if (!S.audio || S.exporting) return;
+  if (S.tap) { $('timingStatus').textContent = 'タップ同期を終了してから仮配置してください。'; return; }
+  try {
+    const start = Number($('autoStart').value);
+    const end = $('autoEnd').value === '' ? S.audio.duration : Number($('autoEnd').value);
+    const times = J.autoLyricTimes(J.parseLyrics(S.project.lyrics).lines, audioLike(), { start, end, anchors: S.project.timing.lineTimes });
+    rememberTiming();
+    Object.assign(S.project.timing, { autoStart: start, autoEnd: end, autoTimes: times });
+    $('timingStatus').textContent = '仮配置しました。再生して、各行の開始秒・±0.1秒・「今の位置」で修整してください。';
+    syncUI(); replan();
+  } catch (e) { $('timingStatus').textContent = e.message; }
+}
+
 /* ---------------- tap sync ---------------- */
 function startTap() {
-  if (!S.plan.lines.length) return;
-  S.tap = { i: 0 };
-  if (!S.project.timing.lineTimes) S.project.timing.lineTimes = {};
+  if (!S.plan.lines.length || S.exporting) return;
+  rememberTiming();
+  S.tap = { i: 0, times: {} };
   $('tapPanel').hidden = false; $('btnTap').setAttribute('aria-pressed', 'true');
   seek(0); play(); updateTap();
   $('tapBtn').focus();
 }
 function tapNow() {
   if (!S.tap) return;
-  S.project.timing.lineTimes[S.tap.i] = +S.t.toFixed(3);
+  const time = +(S.audio && S.playing ? AP.time() : S.t).toFixed(3);
+  if (time < 0 || (S.tap.i > 0 && time <= S.tap.times[S.tap.i - 1])) {
+    $('timingStatus').textContent = '前の行より後の位置でタップしてください。'; return;
+  }
+  S.tap.times[S.tap.i] = time;
   S.tap.i++;
-  replan();
   if (S.tap.i >= S.plan.lines.length) stopTap(); else updateTap();
 }
-function stopTap() { S.tap = null; $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false'); replan(); }
+function stopTap() {
+  const tap = S.tap;
+  S.tap = null; $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false');
+  if (tap && tap.i) {
+    try {
+      const lineTimes = Object.assign({}, S.project.timing.lineTimes, tap.times);
+      const lines = J.parseLyrics(S.project.lyrics).lines;
+      let timing = Object.assign({}, S.project.timing, { lineTimes, autoTimes: {} });
+      if (S.audio) {
+        const start = Math.min(timing.autoStart ?? 0, tap.times[0]);
+        const end = timing.autoEnd ?? S.audio.duration;
+        timing.autoTimes = J.autoLyricTimes(lines, audioLike(), { start, end, anchors: lineTimes });
+        timing.autoStart = start; timing.autoEnd = end;
+      } else {
+        const starts = J.computeTiming(Object.assign({}, S.project, { timing }), { lines }, null).starts;
+        if (starts.some((t, i) => !Number.isFinite(t) || t < 0 || (i && t <= starts[i - 1]))) {
+          throw new Error('残りの行の確定時刻と前後しています。先に手修整を解除してください。');
+        }
+      }
+      S.project.timing = timing;
+      $('timingStatus').textContent = `${tap.i}行のタップを反映しました。` + (S.audio && tap.i < lines.length ? '残りは確定時刻を保って仮配置しました。' : '');
+      syncUI();
+    } catch (e) {
+      $('timingStatus').textContent = 'タップは反映せず、元のタイミングを保ちました。' + e.message;
+    }
+  }
+  replan();
+}
 function updateTap() { const ln = S.plan.lines[S.tap.i]; $('tapLine').textContent = ln ? `${S.tap.i + 1}. ${ln.text}` : '—'; }
 
 /* ---------------- sync all inputs from project ---------------- */
@@ -13898,13 +14337,17 @@ function syncUI() {
   $('offset').value = S.project.timing.offset ?? 0.4;
   $('lineScale').value = S.project.timing.lineScale ?? 1;
   $('snap').checked = !!S.project.timing.snap;
+  $('autoStart').value = S.project.timing.autoStart ?? 0;
+  $('autoEnd').value = S.project.timing.autoEnd ?? '';
+  $('autoEnd').placeholder = S.audio ? S.audio.duration.toFixed(2) : '曲の終わり';
+  $('btnAutoTiming').disabled = !S.audio;
   $('moodLock').value = S.project.moodLock || '';
   renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid(); phSyncUI();
 }
 
 /* ---------------- wiring ---------------- */
 function bind() {
-  $('lyrics').addEventListener('input', e => { S.project.lyrics = e.target.value; replanSoon(260); });
+  $('lyrics').addEventListener('input', e => updateLyrics(e.target.value));
   $('songTitle').addEventListener('input', e => { S.project.title = e.target.value; replanSoon(300); });
   $('songArtist').addEventListener('input', e => { S.project.artist = e.target.value; replanSoon(300); });
   $('btnSyntax').addEventListener('click', e => { const s = $('syntax'); s.hidden = !s.hidden; e.target.setAttribute('aria-expanded', String(!s.hidden)); });
@@ -13915,17 +14358,30 @@ function bind() {
   // 雰囲気ロック：固定すると、以後の「おまかせ」は常にこの雰囲気を使う
   $('moodLock').innerHTML = '<option value="">おまかせ（毎回変える）</option>' + Object.keys(J.MOODS).map(k => `<option value="${k}">${escapeHtml(J.MOODS[k].name)}</option>`).join('');
   $('moodLock').addEventListener('change', e => { S.project.moodLock = e.target.value || null; autosave(); });
-  $('btnResetTimes').addEventListener('click', () => { S.project.timing.lineTimes = {}; replan(); });
+  $('btnResetTimes').addEventListener('click', () => { if (S.tap || S.exporting) return; rememberTiming(); S.project.timing.lineTimes = {}; replan(); });
+  $('btnAutoTiming').addEventListener('click', autoTiming);
+  $('btnAutoStart').addEventListener('click', () => { $('autoStart').value = S.t.toFixed(2); });
+  $('btnAutoEnd').addEventListener('click', () => { $('autoEnd').value = S.t.toFixed(2); });
+  $('btnUndoTiming').addEventListener('click', () => {
+    if (!timingUndo || S.exporting || S.tap) return;
+    S.project.timing = timingUndo; timingUndo = null; $('btnUndoTiming').disabled = true;
+    $('timingStatus').textContent = '直前のタイミングに戻しました。'; syncUI(); replan();
+  });
   $('audioFile').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
     $('audioName').textContent = '解析中…';
     try {
       pause();
+      if (S.tap) stopTap();
       S.audio = await J.analyzeAudio(f);
       $('audioName').textContent = `${f.name}（${J.fmtTime(S.audio.duration)}・約${S.audio.bpm}BPM）`;
       S.project.timing.snap = true;
       syncUI(); replan();
-    } catch (err) { $('audioName').textContent = '読み込めませんでした: ' + err.message; S.audio = null; }
+      const hasTimes = Object.keys(S.project.timing.lineTimes || {}).length || Object.keys(S.project.timing.autoTimes || {}).length || J.parseLyrics(S.project.lyrics).lines.some(l => l.lrc != null);
+      if (!hasTimes) autoTiming();
+      else $('timingStatus').textContent = '保存済みのタイミングを保持しました。必要なら範囲を指定して「曲に合わせて仮配置」を押してください。';
+    } catch (err) { $('audioName').textContent = '読み込めませんでした: ' + err.message; S.audio = null; syncUI(); replan(); }
+    e.target.value = '';
   });
   $('btnTap').addEventListener('click', () => (S.tap ? stopTap() : startTap()));
   $('tapBtn').addEventListener('click', tapNow);
@@ -13996,14 +14452,14 @@ function bind() {
   $('eMood').addEventListener('click', () => rerollPart('mood'));
   $('eCut').addEventListener('click', () => rerollPart('cut'));
   $('ePalette').addEventListener('click', () => { randomPalette(); restartPreview(); });
-  $('btnSave').addEventListener('click', () => J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)));
+  $('btnSave').addEventListener('click', () => { prepareRecovery(); J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)); });
   $('btnAE').addEventListener('click', () => {
     if (S.plan.photo && S.plan.photo.on) toast('写真PVモードの写真はAE用データには含まれません');
     J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1));
   });
   $('fileProject').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    try { S.project = mergeProject(JSON.parse(await f.text())); syncUI(); replan(); reconcilePhotos(); }
+    try { S.project = mergeProject(JSON.parse(await f.text())); timingUndo = null; $('btnUndoTiming').disabled = true; syncUI(); replan(); reconcilePhotos(); }
     catch (err) { showMsg('プロジェクトを読み込めませんでした'); setTimeout(() => showMsg(null), 2500); }
     e.target.value = '';
   });
@@ -14060,6 +14516,8 @@ function bind() {
     else if (e.code === 'ArrowLeft') seek(S.t - (e.shiftKey ? 1 : 1 / S.plan.fps));
     else if (e.code === 'KeyR' && !e.metaKey && !e.ctrlKey && !e.altKey && !S.exporting) { e.preventDefault(); omakase(); }
   });
+  window.addEventListener('pagehide', () => { saveNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   window.addEventListener('resize', () => { sizeViewport(); drawTimeline(); });
   if (window.ResizeObserver) new ResizeObserver(() => { sizeViewport(); drawTimeline(); }).observe($('viewport'));
 }
@@ -14078,6 +14536,7 @@ function boot() {
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 J.ui = S;
 })();
+
 
 </script>
 </body>

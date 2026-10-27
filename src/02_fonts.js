@@ -88,26 +88,51 @@ J.metrics = {
    each can be flown, shattered or dropped independently. Works with any
    font the browser can render, including local and uploaded ones.        */
 class GlyphCache {
-  constructor() { this.map = new Map(); this.tint = new Map(); this.count = 0; this.maxRes = 512; }
-  clear() { this.map.clear(); this.tint.clear(); }
+  constructor() {
+    this.map = new Map(); this.tint = new Map(); this.maxRes = 512;
+    // RGBA backing-store estimates. Animated colors can produce a new tint on
+    // every frame, so both canvas bytes and entry counts must have a limit.
+    this.glyphBytes = 0; this.tintBytes = 0;
+    this.maxGlyphBytes = 64 * 1024 * 1024; this.maxTintBytes = 32 * 1024 * 1024;
+    this.maxGlyphEntries = 1800; this.maxTintEntries = 4096;
+  }
+  clear() { this.map.clear(); this.tint.clear(); this.glyphBytes = this.tintBytes = 0; }
   bucket(px) { let r = 64; while (r < px && r < this.maxRes) r *= 2; return r; }
   get(fontKey, ch, px) {
     const res = this.bucket(px);
     const key = fontKey + '|' + ch + '|' + res;
     let g = this.map.get(key);
-    if (!g) { g = decompose(fontKey, ch, res); this.map.set(key, g); if (this.map.size > 1800) this.evict(); }
+    if (g) { this.map.delete(key); this.map.set(key, g); return g; }
+    g = decompose(fontKey, ch, res);
+    g.cacheBytes = g.pieces.reduce((sum, piece) => sum + piece.cv.width * piece.cv.height * 4, 0);
+    if (g.cacheBytes <= this.maxGlyphBytes) {
+      this.map.set(key, g); this.glyphBytes += g.cacheBytes; this.evict();
+    }
     return g;
   }
-  evict() { let n = 0; for (const k of this.map.keys()) { this.map.delete(k); if (++n > 600) break; } this.tint.clear(); }
+  evict() {
+    while (this.map.size && (this.glyphBytes > this.maxGlyphBytes || this.map.size > this.maxGlyphEntries)) {
+      const key = this.map.keys().next().value;
+      this.glyphBytes -= this.map.get(key).cacheBytes; this.map.delete(key);
+    }
+    while (this.tint.size && (this.tintBytes > this.maxTintBytes || this.tint.size > this.maxTintEntries)) {
+      const key = this.tint.keys().next().value;
+      const canvas = this.tint.get(key);
+      this.tintBytes -= canvas.width * canvas.height * 4; this.tint.delete(key);
+    }
+    // Drop cache references only: a renderer may still be drawing a returned
+    // glyph or sprite during this frame. Resizing its canvas would erase it.
+  }
   sprite(piece, color) {              // tinted copy of a white piece sprite
     if (color === '#ffffff' || color === '#fff') return piece.cv;
-    let m = this.tint.get(piece.id);
-    if (!m) { m = new Map(); this.tint.set(piece.id, m); }
-    let c = m.get(color);
-    if (!c) {
-      c = document.createElement('canvas'); c.width = piece.cv.width; c.height = piece.cv.height;
-      const x = c.getContext('2d'); x.drawImage(piece.cv, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
-      m.set(color, c);
+    const key = piece.id + '|' + color;
+    let c = this.tint.get(key);
+    if (c) { this.tint.delete(key); this.tint.set(key, c); return c; }
+    c = document.createElement('canvas'); c.width = piece.cv.width; c.height = piece.cv.height;
+    const x = c.getContext('2d'); x.drawImage(piece.cv, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
+    const bytes = c.width * c.height * 4;
+    if (bytes <= this.maxTintBytes) {
+      this.tint.set(key, c); this.tintBytes += bytes; this.evict();
     }
     return c;
   }
@@ -230,3 +255,4 @@ function clipHalf(poly, nx, ny, d0, sgn) {
   return out;
 }
 })();
+

@@ -18,7 +18,7 @@ J.defaultProject = () => ({
   aspect: '16:9', res: 1080, fps: 24,
   fx: { motion: 0.7, glitch: 0.55, chroma: 0.7, decor: 0.5, density: 0.55, texture: 0.6, flash: true, onTwos: true, koma: 12, hud: 'auto', bgSwitch: 0.35 },
   enabled: Object.fromEntries(J.GROUP_KEYS.map(g => [g, Object.fromEntries(J.order(g).map(k => [k, true]))])),
-  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, lineScale: 1 },
+  timing: { bpm: 0, offset: 0.4, snap: true, tail: 0.9, lineTimes: {}, autoTimes: {}, lineScale: 1 },
   overrides: {},
   colors: { enabled: false },
   fonts: {},
@@ -130,13 +130,16 @@ J.computeTiming = (project, parsed, audio) => {
   const lines = parsed.lines;
   const beat = T.bpm > 0 ? 60 / T.bpm : 0;
   const starts = [];
-  const allLrc = lines.length && lines.every(l => l.lrc != null);
+  const hasAutoTimes = lines.some((_, i) => T.autoTimes && T.autoTimes[i] != null && Number.isFinite(+T.autoTimes[i]));
   let t = T.offset ?? 0.4;
   lines.forEach((l, i) => {
     const man = T.lineTimes && T.lineTimes[i] != null ? +T.lineTimes[i] : null;
+    const auto = T.autoTimes && T.autoTimes[i] != null ? +T.autoTimes[i] : null;
     let s;
-    if (allLrc) s = l.lrc;
-    else if (man != null && isFinite(man)) s = man;
+    // An imported LRC timestamp is a starting point, and remains editable.
+    if (man != null && Number.isFinite(man)) s = man;
+    else if (l.lrc != null && Number.isFinite(+l.lrc)) s = +l.lrc;
+    else if (auto != null && Number.isFinite(auto)) s = auto;
     else {
       if (i > 0) {
         const n = [...lines[i - 1].text].length;
@@ -148,14 +151,17 @@ J.computeTiming = (project, parsed, audio) => {
     starts.push(s);
   });
   const ends = starts.map((s, i) => {
-    if (i < starts.length - 1) return Math.max(s + 0.35, starts[i + 1]);
+    // Closely spaced phrases must not keep the previous lyric over the next one.
+    if (i < starts.length - 1) return starts[i + 1] > s ? starts[i + 1] : s + 0.35;
+    if (hasAutoTimes && T.autoEnd != null && Number.isFinite(+T.autoEnd) && +T.autoEnd > s) return +T.autoEnd;
     const n = [...lines[i].text].length;
     let d = J.clamp(0.8 + n * 0.17, 1.5, 5.2) * (T.lineScale || 1);
     if (beat) d = Math.max(2, Math.round(d / beat)) * beat;
+    if (hasAutoTimes && audio && audio.duration > s) return Math.min(s + d, audio.duration);
     return s + d;
   });
   let duration = (ends.length ? ends[ends.length - 1] : 3) + (T.tail ?? 0.9);
-  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + 0.2 : 1);
+  if (audio && audio.duration && T.useAudioLength !== false) duration = Math.max(audio.duration, ends.length ? ends[ends.length - 1] + (hasAutoTimes ? 0 : 0.2) : 1);
   return { starts, ends, duration };
 };
 
@@ -463,3 +469,4 @@ J.outputSize = (project) => {
   return [Math.round(W * k / 2) * 2, Math.round(H * k / 2) * 2];
 };
 })();
+

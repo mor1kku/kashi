@@ -6,6 +6,7 @@
 if (!document.getElementById('app')) return;          // engine-only pages (tests)
 const $ = id => document.getElementById(id);
 const LS_KEY = 'jizura.project.v1';
+const RECOVERY_KEY = LS_KEY + '.recovery';
 const HUD_CHARS = '0123456789:./-_()【】・No.LYRICRECUNTITLEDXYlinebpminterlude—─／ ';
 const ICON = {
   dice: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="5.5" cy="5.5" r="1" fill="currentColor"/><circle cx="10.5" cy="10.5" r="1" fill="currentColor"/><circle cx="10.5" cy="5.5" r="1" fill="currentColor"/><circle cx="5.5" cy="10.5" r="1" fill="currentColor"/></svg>',
@@ -52,9 +53,40 @@ async function reconcilePhotos() {
   const { ids: kept, missing } = await J.photo.filterExisting(ids);
   if (missing) { S.project.photo.ids = kept; phSyncUI(); replan(); toast(`写真 ${missing}枚が見つかりませんでした`); }
 }
-function loadLocal() { try { const s = localStorage.getItem(LS_KEY); if (s) return mergeProject(JSON.parse(s)); } catch (e) {} return mergeProject(null); }
+function loadLocal() {
+  for (const key of [LS_KEY, RECOVERY_KEY]) {
+    try {
+      const raw = localStorage.getItem(key); if (!raw) continue;
+      const p = JSON.parse(raw);
+      if (!p || typeof p !== 'object' || typeof p.lyrics !== 'string') continue;
+      return mergeProject(p);
+    } catch (e) {}
+  }
+  return mergeProject(null);
+}
 let saveTimer = 0;
-function autosave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(S.project)); } catch (e) {} }, 700); }
+function saveNow(recovery = false) {
+  clearTimeout(saveTimer);
+  const json = JSON.stringify(S.project);
+  try {
+    localStorage.setItem(LS_KEY, json);
+    if (recovery) localStorage.setItem(RECOVERY_KEY, json);
+    return true;
+  } catch (e) {
+    toast('ブラウザに編集を保存できません。「編集データを保存」でバックアップしてください。');
+    return false;
+  }
+}
+function autosave() { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveNow(), 700); }
+let recoveryDownload = null;
+function prepareRecovery() {
+  saveNow(true);
+  if (recoveryDownload) recoveryDownload.dispose();
+  recoveryDownload = J.prepareDownload(baseName() + '.jizura.json', new Blob([JSON.stringify(S.project, null, 1)], { type: 'application/json' }));
+  $('recoveryLink').href = recoveryDownload.url;
+  $('recoveryLink').download = recoveryDownload.filename;
+  $('exportRecovery').hidden = false;
+}
 
 /* ---------------- planning ---------------- */
 function audioLike() {
@@ -241,9 +273,15 @@ function renderLines() {
     const o = ov[i] || {};
     const li = document.createElement('li'); li.className = 'ln';
     const manual = S.project.timing.lineTimes && S.project.timing.lineTimes[i] != null;
+    const automatic = S.project.timing.autoTimes && S.project.timing.autoTimes[i] != null;
     li.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span>
-      <input class="time mono" type="number" step="0.01" min="0" value="${ln.start.toFixed(2)}" title="開始（秒）${manual ? '・手動' : '・自動'}" aria-label="${i + 1}行目の開始秒" style="${manual ? 'border-color:var(--cyan)' : ''}">
+      <input class="time mono" type="number" step="0.01" min="0" value="${ln.start.toFixed(2)}" title="開始（秒）${manual ? '・手修整' : automatic ? '・仮配置' : '・自動'}" aria-label="${i + 1}行目の開始秒" style="${manual ? 'border-color:var(--cyan)' : ''}">
       <span class="txt" title="${escapeHtml(ln.text)}">${escapeHtml(ln.text)}</span>
+      <div class="timing-tools">
+        <button class="ghost small earlier" aria-label="${i + 1}行目を0.1秒早める">−0.1秒</button>
+        <button class="ghost small later" aria-label="${i + 1}行目を0.1秒遅らせる">＋0.1秒</button>
+        <button class="ghost small set-now" title="この行の開始を現在の再生位置に合わせる">今の位置</button>
+      </div>
       <div class="meta"><span class="cuts"></span>
       <span class="tools">
         <select aria-label="レイアウト指定">${layoutOpts}</select>
@@ -253,10 +291,11 @@ function renderLines() {
     li.querySelector('select').value = o.layout || '';
     li.querySelector('.time').addEventListener('change', e => {
       const v = parseFloat(e.target.value);
-      if (!S.project.timing.lineTimes) S.project.timing.lineTimes = {};
-      if (isFinite(v)) S.project.timing.lineTimes[i] = Math.max(0, v); else delete S.project.timing.lineTimes[i];
-      replan();
+      setLineTime(i, v);
     });
+    li.querySelector('.earlier').addEventListener('click', () => setLineTime(i, ln.start - 0.1));
+    li.querySelector('.later').addEventListener('click', () => setLineTime(i, ln.start + 0.1));
+    li.querySelector('.set-now').addEventListener('click', () => setLineTime(i, S.audio && S.playing ? AP.time() : S.t));
     li.querySelector('.txt').addEventListener('click', () => seek(ln.start + 0.001));
     li.querySelector('select').addEventListener('change', e => { setOv(i, { layout: e.target.value || undefined }); replan(); });
     li.querySelector('.dice').addEventListener('click', () => { const cur = ov[i] || {}; setOv(i, { seed: (cur.seed | 0) + 1, lock: false }); replan(); seek(ln.start + 0.001); });
@@ -602,9 +641,29 @@ async function codecNote() {
 }
 const EXP_BTNS = ['btnMP4', 'btnPNG', 'btnPNGA', 'eMP4'];
 function baseName() { return ((S.project.title || 'jizura').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'jizura'); }
+let lastDownload = null;
+function showDownload(filename, blob) {
+  const result = J.prepareDownload(filename, blob);
+  if (lastDownload) lastDownload.dispose();
+  lastDownload = result;
+  $('downloadLink').href = result.url; $('downloadLink').download = filename;
+  $('downloadOpen').href = result.url;
+  $('downloadName').textContent = `${filename}（${(blob.size / 1048576).toFixed(1)}MB）`;
+  $('downloadResult').hidden = false;
+}
+async function offerDownload(filename, blob) {
+  showDownload(filename, blob);
+  toast('書き出しが完了しました。「ダウンロード」を押して保存してください。');
+}
 async function runExport(kind) {
   if (S.exporting) return;
   pause();
+  if (S.tap) stopTap();
+  prepareRecovery();
+  // Release the previous video before allocating another export.
+  if (lastDownload) { lastDownload.dispose(); lastDownload = null; }
+  $('downloadLink').removeAttribute('href'); $('downloadOpen').removeAttribute('href');
+  $('downloadResult').hidden = true;
   const ac = new AbortController(); S.exporting = ac;
   const boxes = [...document.querySelectorAll('.exp-box')];
   const setText = m => boxes.forEach(b => { b.querySelector('.exp-text').textContent = m; });
@@ -619,12 +678,12 @@ async function runExport(kind) {
     if (kind === 'mp4') {
       const r = await J.exportMP4({ plan: S.plan, project: S.project, audio: S.project.includeAudio !== false ? S.audio : null, quality: S.project.quality || 'high', onProgress, signal: ac.signal });
       txt.textContent = `完成 ${(r.blob.size / 1048576).toFixed(1)}MB・${r.codec}${r.audio ? ' + ' + r.audio.toUpperCase() : ''}・${((performance.now() - t0) / 1000).toFixed(0)}秒`;
-      const res = await J.saveFile(baseName() + '.mp4', r.blob);
-      if (res === 'declined') txt.textContent += '（保存はキャンセルされました）';
+      await offerDownload(baseName() + '.mp4', r.blob);
+      txt.textContent += '・ダウンロードを押して保存';
     } else {
       const blob = await J.exportPNGZip({ plan: S.plan, project: S.project, transparent: kind === 'pnga', onProgress, signal: ac.signal });
       txt.textContent = `完成 ${(blob.size / 1048576).toFixed(1)}MB`;
-      await J.saveFile(baseName() + (kind === 'pnga' ? '_alpha' : '') + '_png.zip', blob);
+      await offerDownload(baseName() + (kind === 'pnga' ? '_alpha' : '') + '_png.zip', blob);
     }
   } catch (e) {
     txt.textContent = 'エラー: ' + (e && e.message ? e.message : e);
@@ -636,23 +695,127 @@ async function runExport(kind) {
   }
 }
 
+/* ---------------- automatic draft timing + manual correction ---------------- */
+let timingUndo = null;
+function rememberTiming() {
+  timingUndo = JSON.parse(JSON.stringify(S.project.timing));
+  $('btnUndoTiming').disabled = false;
+}
+function setLineTime(i, value) {
+  if (S.exporting) return;
+  if (S.tap) { $('timingStatus').textContent = 'タップ同期を終了してから行を修整してください。'; return; }
+  if (Number.isFinite(value)) value = +value.toFixed(3);
+  const previous = i > 0 ? S.plan.lines[i - 1].start : -0.01;
+  const next = i + 1 < S.plan.lines.length ? S.plan.lines[i + 1].start : (S.project.timing.autoEnd ?? S.audio?.duration ?? Infinity);
+  const times = Object.assign({}, S.project.timing.lineTimes);
+  if (Number.isFinite(value)) times[i] = value; else delete times[i];
+  const candidate = Object.assign({}, S.project, { timing: Object.assign({}, S.project.timing, { lineTimes: times }) });
+  const actual = J.computeTiming(candidate, J.parseLyrics(S.project.lyrics), audioLike()).starts[i];
+  if (!Number.isFinite(actual) || actual < 0 || actual <= previous || actual >= next) {
+    $('timingStatus').textContent = '開始秒は前の行より後、次の行（または歌い終わり）より前にしてください。';
+    renderLines(); return;
+  }
+  rememberTiming();
+  S.project.timing.lineTimes = times;
+  $('timingStatus').textContent = `${i + 1}行目のタイミングを更新しました。`;
+  replan();
+}
+function updateLyrics(raw) {
+  const oldLines = J.parseLyrics(S.project.lyrics).lines, newLines = J.parseLyrics(raw).lines;
+  const signature = lines => JSON.stringify(lines.map(l => [l.text, l.lrc, l.gapBefore]));
+  if (signature(oldLines) !== signature(newLines)) {
+    if (S.tap) { S.tap = null; pause(); $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false'); }
+    const oldTimes = S.project.timing.lineTimes || {}, mapped = {};
+    const oldIndices = new Map(), newIndices = new Map();
+    oldLines.forEach((l, i) => oldIndices.set(l.text, [...(oldIndices.get(l.text) || []), i]));
+    newLines.forEach((l, i) => newIndices.set(l.text, [...(newIndices.get(l.text) || []), i]));
+    newLines.forEach((line, i) => {
+      const oldMatches = oldIndices.get(line.text) || [], newMatches = newIndices.get(line.text) || [];
+      let oldIndex = oldMatches.length === 1 && newMatches.length === 1 ? oldMatches[0] : -1;
+      // With the same row count, preserve a correction when editing that row's words.
+      // Existing matching rows take priority, so inserted or reordered rows are not misassigned.
+      if (oldIndex < 0 && oldLines.length === newLines.length &&
+          (oldLines[i].text === line.text || (!oldMatches.length && !newIndices.has(oldLines[i].text)))) oldIndex = i;
+      if (oldIndex >= 0 && oldTimes[oldIndex] != null) mapped[i] = oldTimes[oldIndex];
+    });
+    // A reordering can make old anchors contradict the new order. Keep only compatible ones.
+    let previous = -1;
+    for (let i = 0; i < newLines.length; i++) {
+      const value = mapped[i] != null ? +mapped[i] : newLines[i].lrc;
+      if (value == null) continue;
+      if (!Number.isFinite(value) || value <= previous) delete mapped[i];
+      else previous = value;
+    }
+    S.project.timing.lineTimes = mapped;
+    S.project.timing.autoTimes = {};
+    timingUndo = null; $('btnUndoTiming').disabled = true;
+    $('timingStatus').textContent = (oldLines.length !== newLines.length ? '行数が変わりました。対応する行の手修整を引き継ぎました。' : '歌詞を変更しました。対応する行の手修整を保ちました。') +
+      (S.audio ? '「曲に合わせて仮配置」で再配置してください。' : '曲を読み込んで仮配置してください。');
+  }
+  S.project.lyrics = raw;
+  replanSoon(260);
+}
+function autoTiming() {
+  if (!S.audio || S.exporting) return;
+  if (S.tap) { $('timingStatus').textContent = 'タップ同期を終了してから仮配置してください。'; return; }
+  try {
+    const start = Number($('autoStart').value);
+    const end = $('autoEnd').value === '' ? S.audio.duration : Number($('autoEnd').value);
+    const times = J.autoLyricTimes(J.parseLyrics(S.project.lyrics).lines, audioLike(), { start, end, anchors: S.project.timing.lineTimes });
+    rememberTiming();
+    Object.assign(S.project.timing, { autoStart: start, autoEnd: end, autoTimes: times });
+    $('timingStatus').textContent = '仮配置しました。再生して、各行の開始秒・±0.1秒・「今の位置」で修整してください。';
+    syncUI(); replan();
+  } catch (e) { $('timingStatus').textContent = e.message; }
+}
+
 /* ---------------- tap sync ---------------- */
 function startTap() {
-  if (!S.plan.lines.length) return;
-  S.tap = { i: 0 };
-  if (!S.project.timing.lineTimes) S.project.timing.lineTimes = {};
+  if (!S.plan.lines.length || S.exporting) return;
+  rememberTiming();
+  S.tap = { i: 0, times: {} };
   $('tapPanel').hidden = false; $('btnTap').setAttribute('aria-pressed', 'true');
   seek(0); play(); updateTap();
   $('tapBtn').focus();
 }
 function tapNow() {
   if (!S.tap) return;
-  S.project.timing.lineTimes[S.tap.i] = +S.t.toFixed(3);
+  const time = +(S.audio && S.playing ? AP.time() : S.t).toFixed(3);
+  if (time < 0 || (S.tap.i > 0 && time <= S.tap.times[S.tap.i - 1])) {
+    $('timingStatus').textContent = '前の行より後の位置でタップしてください。'; return;
+  }
+  S.tap.times[S.tap.i] = time;
   S.tap.i++;
-  replan();
   if (S.tap.i >= S.plan.lines.length) stopTap(); else updateTap();
 }
-function stopTap() { S.tap = null; $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false'); replan(); }
+function stopTap() {
+  const tap = S.tap;
+  S.tap = null; $('tapPanel').hidden = true; $('btnTap').setAttribute('aria-pressed', 'false');
+  if (tap && tap.i) {
+    try {
+      const lineTimes = Object.assign({}, S.project.timing.lineTimes, tap.times);
+      const lines = J.parseLyrics(S.project.lyrics).lines;
+      let timing = Object.assign({}, S.project.timing, { lineTimes, autoTimes: {} });
+      if (S.audio) {
+        const start = Math.min(timing.autoStart ?? 0, tap.times[0]);
+        const end = timing.autoEnd ?? S.audio.duration;
+        timing.autoTimes = J.autoLyricTimes(lines, audioLike(), { start, end, anchors: lineTimes });
+        timing.autoStart = start; timing.autoEnd = end;
+      } else {
+        const starts = J.computeTiming(Object.assign({}, S.project, { timing }), { lines }, null).starts;
+        if (starts.some((t, i) => !Number.isFinite(t) || t < 0 || (i && t <= starts[i - 1]))) {
+          throw new Error('残りの行の確定時刻と前後しています。先に手修整を解除してください。');
+        }
+      }
+      S.project.timing = timing;
+      $('timingStatus').textContent = `${tap.i}行のタップを反映しました。` + (S.audio && tap.i < lines.length ? '残りは確定時刻を保って仮配置しました。' : '');
+      syncUI();
+    } catch (e) {
+      $('timingStatus').textContent = 'タップは反映せず、元のタイミングを保ちました。' + e.message;
+    }
+  }
+  replan();
+}
 function updateTap() { const ln = S.plan.lines[S.tap.i]; $('tapLine').textContent = ln ? `${S.tap.i + 1}. ${ln.text}` : '—'; }
 
 /* ---------------- sync all inputs from project ---------------- */
@@ -664,13 +827,17 @@ function syncUI() {
   $('offset').value = S.project.timing.offset ?? 0.4;
   $('lineScale').value = S.project.timing.lineScale ?? 1;
   $('snap').checked = !!S.project.timing.snap;
+  $('autoStart').value = S.project.timing.autoStart ?? 0;
+  $('autoEnd').value = S.project.timing.autoEnd ?? '';
+  $('autoEnd').placeholder = S.audio ? S.audio.duration.toFixed(2) : '曲の終わり';
+  $('btnAutoTiming').disabled = !S.audio;
   $('moodLock').value = S.project.moodLock || '';
   renderFontRoles(); renderColors(); renderFx(); renderTech(); syncOut(); drawStyleGrid(); phSyncUI();
 }
 
 /* ---------------- wiring ---------------- */
 function bind() {
-  $('lyrics').addEventListener('input', e => { S.project.lyrics = e.target.value; replanSoon(260); });
+  $('lyrics').addEventListener('input', e => updateLyrics(e.target.value));
   $('songTitle').addEventListener('input', e => { S.project.title = e.target.value; replanSoon(300); });
   $('songArtist').addEventListener('input', e => { S.project.artist = e.target.value; replanSoon(300); });
   $('btnSyntax').addEventListener('click', e => { const s = $('syntax'); s.hidden = !s.hidden; e.target.setAttribute('aria-expanded', String(!s.hidden)); });
@@ -681,17 +848,30 @@ function bind() {
   // 雰囲気ロック：固定すると、以後の「おまかせ」は常にこの雰囲気を使う
   $('moodLock').innerHTML = '<option value="">おまかせ（毎回変える）</option>' + Object.keys(J.MOODS).map(k => `<option value="${k}">${escapeHtml(J.MOODS[k].name)}</option>`).join('');
   $('moodLock').addEventListener('change', e => { S.project.moodLock = e.target.value || null; autosave(); });
-  $('btnResetTimes').addEventListener('click', () => { S.project.timing.lineTimes = {}; replan(); });
+  $('btnResetTimes').addEventListener('click', () => { if (S.tap || S.exporting) return; rememberTiming(); S.project.timing.lineTimes = {}; replan(); });
+  $('btnAutoTiming').addEventListener('click', autoTiming);
+  $('btnAutoStart').addEventListener('click', () => { $('autoStart').value = S.t.toFixed(2); });
+  $('btnAutoEnd').addEventListener('click', () => { $('autoEnd').value = S.t.toFixed(2); });
+  $('btnUndoTiming').addEventListener('click', () => {
+    if (!timingUndo || S.exporting || S.tap) return;
+    S.project.timing = timingUndo; timingUndo = null; $('btnUndoTiming').disabled = true;
+    $('timingStatus').textContent = '直前のタイミングに戻しました。'; syncUI(); replan();
+  });
   $('audioFile').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
     $('audioName').textContent = '解析中…';
     try {
       pause();
+      if (S.tap) stopTap();
       S.audio = await J.analyzeAudio(f);
       $('audioName').textContent = `${f.name}（${J.fmtTime(S.audio.duration)}・約${S.audio.bpm}BPM）`;
       S.project.timing.snap = true;
       syncUI(); replan();
-    } catch (err) { $('audioName').textContent = '読み込めませんでした: ' + err.message; S.audio = null; }
+      const hasTimes = Object.keys(S.project.timing.lineTimes || {}).length || Object.keys(S.project.timing.autoTimes || {}).length || J.parseLyrics(S.project.lyrics).lines.some(l => l.lrc != null);
+      if (!hasTimes) autoTiming();
+      else $('timingStatus').textContent = '保存済みのタイミングを保持しました。必要なら範囲を指定して「曲に合わせて仮配置」を押してください。';
+    } catch (err) { $('audioName').textContent = '読み込めませんでした: ' + err.message; S.audio = null; syncUI(); replan(); }
+    e.target.value = '';
   });
   $('btnTap').addEventListener('click', () => (S.tap ? stopTap() : startTap()));
   $('tapBtn').addEventListener('click', tapNow);
@@ -762,14 +942,14 @@ function bind() {
   $('eMood').addEventListener('click', () => rerollPart('mood'));
   $('eCut').addEventListener('click', () => rerollPart('cut'));
   $('ePalette').addEventListener('click', () => { randomPalette(); restartPreview(); });
-  $('btnSave').addEventListener('click', () => J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)));
+  $('btnSave').addEventListener('click', () => { prepareRecovery(); J.saveFile(baseName() + '.jizura.json', JSON.stringify(S.project, null, 1)); });
   $('btnAE').addEventListener('click', () => {
     if (S.plan.photo && S.plan.photo.on) toast('写真PVモードの写真はAE用データには含まれません');
     J.saveFile(baseName() + '_ae.json', JSON.stringify(J.planForAE(S.plan, S.project), null, 1));
   });
   $('fileProject').addEventListener('change', async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    try { S.project = mergeProject(JSON.parse(await f.text())); syncUI(); replan(); reconcilePhotos(); }
+    try { S.project = mergeProject(JSON.parse(await f.text())); timingUndo = null; $('btnUndoTiming').disabled = true; syncUI(); replan(); reconcilePhotos(); }
     catch (err) { showMsg('プロジェクトを読み込めませんでした'); setTimeout(() => showMsg(null), 2500); }
     e.target.value = '';
   });
@@ -826,6 +1006,8 @@ function bind() {
     else if (e.code === 'ArrowLeft') seek(S.t - (e.shiftKey ? 1 : 1 / S.plan.fps));
     else if (e.code === 'KeyR' && !e.metaKey && !e.ctrlKey && !e.altKey && !S.exporting) { e.preventDefault(); omakase(); }
   });
+  window.addEventListener('pagehide', () => { saveNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
   window.addEventListener('resize', () => { sizeViewport(); drawTimeline(); });
   if (window.ResizeObserver) new ResizeObserver(() => { sizeViewport(); drawTimeline(); }).observe($('viewport'));
 }
@@ -844,3 +1026,4 @@ function boot() {
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 J.ui = S;
 })();
+
