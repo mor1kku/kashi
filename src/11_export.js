@@ -51,10 +51,12 @@ J.pickVideoCodec = async (w, h, fps, bitrate) => {
   return null;
 };
 J.pickAudioCodec = async (sr, chn) => {
-  if (typeof AudioEncoder === 'undefined') return null;
-  for (const c of [{ codec: 'mp4a.40.2', mux: 'aac', sr: 48000 }, { codec: 'opus', mux: 'opus', sr: 48000 }]) {
+  const c = { codec: 'mp4a.40.2', mux: 'aac', sr: 48000 };
+  if (typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined') {
     try { const s = await AudioEncoder.isConfigSupported({ codec: c.codec, sampleRate: c.sr, numberOfChannels: chn, bitrate: 192000 }); if (s.supported) return c; } catch (e) {}
   }
+  // Opus in MP4 is silent in some phone/gallery players. Always produce AAC.
+  if (J.createSoftwareAacEncoder) return { ...c, software: true };
   return null;
 };
 
@@ -89,7 +91,7 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
   let ac = null;
   if (wantsAudio) {
     ac = await J.pickAudioCodec(48000, Math.min(2, audio.buffer.numberOfChannels));
-    if (!ac || typeof AudioData === 'undefined') throw new Error('このブラウザでは音声付きMP4を書き出せません。Chrome / Edgeで開くか、「曲を含める」をOFFにしてください。');
+    if (!ac) throw new Error('このブラウザでは音声付きMP4を書き出せません。最新版のChrome / Edgeでページを開き直してください。');
   }
   const target = new Mp4Muxer.ArrayBufferTarget();
   // A local download can keep its metadata at the end. Unlike in-memory fast
@@ -98,17 +100,17 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
   const muxOpts = { target, video: { codec: vc.mux, width: w, height: h, frameRate: fps }, fastStart: false, firstTimestampBehavior: 'offset' };
   if (ac) muxOpts.audio = { codec: ac.mux, numberOfChannels: Math.min(2, audio.buffer.numberOfChannels), sampleRate: ac.sr };
   const muxer = new Mp4Muxer.Muxer(muxOpts);
-  let err = null, venc = null, aenc = null, encodedBytes = 0;
+  let err = null, venc = null, aenc = null, softwareAudio = null, encodedBytes = 0, audioChunks = 0;
   const check = () => {
     if (signal && signal.aborted) throw new Error('キャンセルしました');
     if (err) throw err;
   };
   const close = encoder => { if (encoder && encoder.state !== 'closed') { try { encoder.close(); } catch (e) {} } };
-  const abort = () => { close(venc); close(aenc); };
+  const abort = () => { close(venc); close(aenc); softwareAudio?.close(); };
   const output = add => (chunk, meta) => {
     if (err) return;
     try {
-      encodedBytes += chunk.byteLength || 0;
+      encodedBytes += chunk.byteLength || chunk.data?.byteLength || 0;
       if (encodedBytes > MP4_MAX_BYTES) throw memoryError();
       add(chunk, meta);
     } catch (e) { err = e; }
@@ -124,6 +126,12 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
   if (signal) signal.addEventListener('abort', abort);
   try {
     check();
+    if (ac?.software) {
+      onProgress && onProgress(0, '音声の書き出しを準備中');
+      softwareAudio = await J.createSoftwareAacEncoder({ sampleRate: ac.sr, numberOfChannels: Math.min(2, audio.buffer.numberOfChannels), bitrate: 192000 },
+        output((packet, meta) => { muxer.addAudioChunkRaw(packet.data, 'key', packet.timestamp, packet.duration, meta); audioChunks++; }), signal);
+      check();
+    }
     venc = new VideoEncoder({ output: output((chunk, meta) => muxer.addVideoChunk(chunk, meta)), error: e => { err = e; } });
     venc.configure(vc.cfg);
     const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
@@ -148,13 +156,25 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
     if (ac) {
       onProgress && onProgress(0.95, '音声をエンコード中');
       const chn = Math.min(2, audio.buffer.numberOfChannels);
-      aenc = new AudioEncoder({ output: output((chunk, meta) => muxer.addAudioChunk(chunk, meta)), error: e => { err = e; } });
-      aenc.configure({ codec: ac.codec, sampleRate: ac.sr, numberOfChannels: chn, bitrate: 192000 });
+      if (!softwareAudio) {
+        aenc = new AudioEncoder({ output: output((chunk, meta) => { muxer.addAudioChunk(chunk, meta); audioChunks++; }), error: e => { err = e; } });
+        aenc.configure({ codec: ac.codec, sampleRate: ac.sr, numberOfChannels: chn, bitrate: 192000 });
+      }
       const frames = Math.ceil(plan.duration * ac.sr), block = 4800, windowFrames = ac.sr * 5;
       for (let windowStart = 0; windowStart < frames; windowStart += windowFrames) {
         check();
         const rs = await resample(audio.buffer, ac.sr, windowStart / ac.sr, Math.min(windowFrames, frames - windowStart));
         check();
+        if (softwareAudio) {
+          const data = new Float32Array(rs.length * chn);
+          for (let c = 0; c < chn; c++) {
+            const plane = rs.getChannelData(c);
+            for (let i = 0; i < rs.length; i++) data[i * chn + c] = plane[i];
+          }
+          await softwareAudio.encode(data); check();
+          onProgress && onProgress(0.95 + 0.04 * Math.min(frames, windowStart + rs.length) / frames, '音声をエンコード中');
+          continue;
+        }
         for (let off = 0; off < rs.length; off += block) {
           check();
           const n = Math.min(block, rs.length - off);
@@ -169,8 +189,10 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
           }
         }
       }
-      await aenc.flush();
-      check(); close(aenc);
+      if (softwareAudio) await softwareAudio.flush();
+      else await aenc.flush();
+      check(); close(aenc); softwareAudio?.close();
+      if (!audioChunks) throw new Error('音声を書き出せなかったため動画の保存を中止しました。ページを開き直して再試行してください。');
     }
     check();
     onProgress && onProgress(0.99, 'MP4を仕上げています');
@@ -181,7 +203,7 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
     check();
     throw e;
   } finally {
-    close(venc); close(aenc);
+    close(venc); close(aenc); softwareAudio?.close();
     J.glyphs.maxRes = prevRes;
     if (signal) signal.removeEventListener('abort', abort);
   }

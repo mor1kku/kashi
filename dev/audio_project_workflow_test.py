@@ -18,6 +18,8 @@ URL = os.environ.get('JIZURA_TEST_URL', 'http://127.0.0.1:8765')
 
 async def context_for(browser):
     context = await browser.new_context(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
+    if os.environ.get('JIZURA_FORCE_SOFTWARE_AAC'):
+        await context.add_init_script('globalThis.AudioEncoder = undefined; globalThis.AudioData = undefined;')
     await context.route('https://fonts.googleapis.com/**', lambda route: route.abort())
     await context.route('https://fonts.gstatic.com/**', lambda route: route.abort())
     return context
@@ -89,6 +91,9 @@ async def main():
         await second.locator('#outQuality').select_option('standard')
         await expect(second.locator('#btnMP4')).to_be_enabled()
         await second.locator('#btnMP4').click()
+        await expect(second.locator('#outAudio')).to_be_disabled()
+        # The export keeps the audio choice made at start, even if project state changes.
+        await second.evaluate('J.ui.project.includeAudio = false')
         await expect(second.locator('#downloadResult')).to_be_visible(timeout=120000)
         backup = await second.evaluate("async()=>JSON.parse(await (await fetch(document.getElementById('recoveryLink').href)).text())")
         assert base64.b64decode(backup['audioData']) == source
@@ -100,15 +105,26 @@ async def main():
             await download.save_as(str(output))
             metadata=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(output)]))
             assert any(s['codec_type']=='audio' for s in metadata['streams'])
-            if any(s.get('codec_name')=='opus' for s in metadata['streams']):
-                await expect(second.locator('#downloadAudioNote')).to_contain_text('一部のスマホ')
+            assert [s['codec_name'] for s in metadata['streams'] if s['codec_type']=='audio'] == ['aac']
+            await expect(second.locator('#downloadAudioNote')).to_contain_text('AAC')
             print('MP4 audio codec:', [s['codec_name'] for s in metadata['streams'] if s['codec_type']=='audio'], flush=True)
             for start in ['0.5','5.5']:
                 raw=subprocess.check_output(['ffmpeg','-v','error','-ss',start,'-i',str(output),'-t','1','-vn','-ac','1','-ar','8000','-f','f32le','pipe:1'])
                 samples=struct.unpack('<'+'f'*(len(raw)//4),raw)
                 rms=math.sqrt(sum(x*x for x in samples)/len(samples))
                 assert rms > .03, (start,rms)
+        await second.evaluate('J.ui.project.includeAudio = true')
         print('PASS: JSON-only import exports downloadable MP4 with non-silent decoded audio before and after the 5s resampling boundary; recovery JSON also includes source')
+
+        # A canceled worker must reject promptly and release its background work.
+        canceled = await second.evaluate('''async () => {
+          const controller = new AbortController();
+          const pending = J.createSoftwareAacEncoder({sampleRate:48000,numberOfChannels:2,bitrate:192000},()=>{},controller.signal);
+          controller.abort();
+          try { await pending; return false; } catch(e) { return e.message.includes('キャンセル'); }
+        }''')
+        assert canceled
+        print('PASS: AAC worker initialization can be canceled without hanging')
 
         # Abort after a successful put request: a failed new write must not poison
         # an older song, and the current in-memory source must still be portable.
