@@ -60,6 +60,51 @@ J.pickAudioCodec = async (sr, chn) => {
   return null;
 };
 
+// Safari's native AAC encoder can return a whole ES_Descriptor (CoreAudio
+// magic cookie) where WebCodecs requires only AudioSpecificConfig. Passing
+// that cookie to the MP4 muxer produces an AAC track with invalid parameters.
+// https://bugs.webkit.org/show_bug.cgi?id=302253
+J.normalizeAacMetadata = (metadata, sampleRate, channels) => {
+  const config = metadata?.decoderConfig;
+  const description = config?.description;
+  if (!description) return metadata; // mp4-muxer derives AAC-LC's default ASC.
+  const bytes = ArrayBuffer.isView(description)
+    ? new Uint8Array(description.buffer, description.byteOffset, description.byteLength)
+    : new Uint8Array(description);
+  const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+  const valid = b => b.length >= 2 && (b[0] >> 3) === 2
+    && rates[((b[0] & 7) << 1) | (b[1] >> 7)] === sampleRate
+    && ((b[1] >> 3) & 15) === channels;
+  if (valid(bytes)) return metadata;
+  const invalid = () => new Error('音声の設定情報を読み取れなかったため保存を中止しました。ページを開き直して再試行してください。');
+  function descriptor(offset, limit) {
+    if (offset >= limit) throw invalid();
+    const tag = bytes[offset++]; let length = 0;
+    for (let i = 0; i < 4; i++) {
+      if (offset >= limit) throw invalid();
+      const b = bytes[offset++]; length = length * 128 + (b & 127);
+      if (!(b & 128)) {
+        if (offset + length > limit) throw invalid();
+        return { tag, start: offset, end: offset + length };
+      }
+    }
+    throw invalid();
+  }
+  const es = descriptor(0, bytes.length);
+  if (es.tag !== 3 || es.end - es.start < 3) throw invalid();
+  const flags = bytes[es.start + 2]; let position = es.start + 3;
+  if (flags & 128) position += 2;
+  if (flags & 64) { if (position >= es.end) throw invalid(); position += 1 + bytes[position]; }
+  if (flags & 32) position += 2;
+  const decoder = descriptor(position, es.end);
+  if (decoder.tag !== 4 || decoder.end - decoder.start < 13 || bytes[decoder.start] !== 0x40) throw invalid();
+  const specific = descriptor(decoder.start + 13, decoder.end);
+  if (specific.tag !== 5) throw invalid();
+  const asc = bytes.slice(specific.start, specific.end);
+  if (!valid(asc)) throw invalid();
+  return { ...metadata, decoderConfig: { ...config, description: asc } };
+};
+
 async function resample(buffer, sr, offset, length) {
   const chn = Math.min(2, buffer.numberOfChannels);
   const oc = new OfflineAudioContext(chn, length, sr);
@@ -78,14 +123,16 @@ J.exportBitrate = (w, h, fps, quality = 'high') => {
   return rates[quality === 'max' ? 2 : quality === 'high' ? 1 : 0] * (fps > 30 ? 1.5 : 1) * 1e6;
 };
 const memoryError = () => new Error('MP4の容量が大きすぎます。解像度を720p、fpsを24または30、画質を標準に下げて再試行してください。');
-J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signal }) => {
+J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signal, range }) => {
   const [w, h] = J.outputSize(project);
   const fps = plan.fps;
   const bitrate = J.exportBitrate(w, h, fps, quality);
   if (project.includeAudio !== false && !audio?.buffer) throw new Error('音声が未読込です。「曲を読み込む」でMP3などを指定してください。音声なしで作る場合は「曲を動画に含める」をOFFにしてください。');
   const wantsAudio = audio && audio.buffer && project.includeAudio !== false;
   if (!Number.isFinite(plan.duration) || plan.duration <= 0) throw new Error('動画の長さを確認してください。');
-  if ((bitrate + (wantsAudio ? 192000 : 0)) * plan.duration / 8 * 1.05 > MP4_MAX_BYTES) throw memoryError();
+  const start = range?.start ?? 0, duration = range?.duration ?? plan.duration;
+  if (!Number.isFinite(start) || !Number.isFinite(duration) || start < 0 || duration <= 0 || start + duration > plan.duration + 1e-7) throw new Error('書き出す区間を曲の範囲内で指定してください。');
+  if ((bitrate + (wantsAudio ? 192000 : 0)) * duration / 8 * 1.05 > MP4_MAX_BYTES) throw memoryError();
   const vc = await J.pickVideoCodec(w, h, fps, bitrate);
   if (!vc) throw new Error('このブラウザは動画エンコード（WebCodecs）に対応していません。Chrome か Edge の最新版で開いてください。');
   let ac = null;
@@ -129,7 +176,7 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
     if (ac?.software) {
       onProgress && onProgress(0, '音声の書き出しを準備中');
       softwareAudio = await J.createSoftwareAacEncoder({ sampleRate: ac.sr, numberOfChannels: Math.min(2, audio.buffer.numberOfChannels), bitrate: 192000 },
-        output((packet, meta) => { muxer.addAudioChunkRaw(packet.data, 'key', packet.timestamp, packet.duration, meta); audioChunks++; }), signal);
+        output((packet, meta) => { muxer.addAudioChunkRaw(packet.data, 'key', packet.timestamp, packet.duration, J.normalizeAacMetadata(meta, ac.sr, Math.min(2, audio.buffer.numberOfChannels))); audioChunks++; }), signal);
       check();
     }
     venc = new VideoEncoder({ output: output((chunk, meta) => muxer.addVideoChunk(chunk, meta)), error: e => { err = e; } });
@@ -138,14 +185,14 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('描画領域を作成できません。解像度を下げて再試行してください。');
     const R = new J.Renderer();
-    const total = Math.max(1, Math.round(plan.duration * fps));
+    const total = Math.max(1, Math.round(duration * fps));
     const scale = w / plan.W;
     J.glyphs.maxRes = h >= 1000 ? 768 : 512;
     for (let i = 0; i < total; i++) {
       check();
-      if (plan.photo && plan.photo.on) await J.photo.ready(plan, i / fps);
+      if (plan.photo && plan.photo.on) await J.photo.ready(plan, start + i / fps);
       check();
-      R.frame(ctx, plan, i / fps, { scale });
+      R.frame(ctx, plan, start + i / fps, { scale });
       const vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
       try { venc.encode(vf, { keyFrame: i % (fps * 2) === 0 }); } finally { vf.close(); }
       await drain(venc, 4);
@@ -157,13 +204,13 @@ J.exportMP4 = async ({ plan, project, audio, quality = 'high', onProgress, signa
       onProgress && onProgress(0.95, '音声をエンコード中');
       const chn = Math.min(2, audio.buffer.numberOfChannels);
       if (!softwareAudio) {
-        aenc = new AudioEncoder({ output: output((chunk, meta) => { muxer.addAudioChunk(chunk, meta); audioChunks++; }), error: e => { err = e; } });
+        aenc = new AudioEncoder({ output: output((chunk, meta) => { muxer.addAudioChunk(chunk, J.normalizeAacMetadata(meta, ac.sr, chn)); audioChunks++; }), error: e => { err = e; } });
         aenc.configure({ codec: ac.codec, sampleRate: ac.sr, numberOfChannels: chn, bitrate: 192000 });
       }
-      const frames = Math.ceil(plan.duration * ac.sr), block = 4800, windowFrames = ac.sr * 5;
+      const frames = Math.ceil(duration * ac.sr), block = 4800, windowFrames = ac.sr * 5;
       for (let windowStart = 0; windowStart < frames; windowStart += windowFrames) {
         check();
-        const rs = await resample(audio.buffer, ac.sr, windowStart / ac.sr, Math.min(windowFrames, frames - windowStart));
+        const rs = await resample(audio.buffer, ac.sr, start + windowStart / ac.sr, Math.min(windowFrames, frames - windowStart));
         check();
         if (softwareAudio) {
           const data = new Float32Array(rs.length * chn);

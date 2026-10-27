@@ -251,6 +251,10 @@ python3 build_ae.py           # ae/ → JIZURA_AE.jsx
 
 音声変換の準備は映像の処理前に確認し、音声が生成されなければ完成扱いにしません。書き出し中は音声ON/OFFを固定し、キャンセル時には音声処理用のWorkerも終了します。
 
+SafariがAACの設定情報を誤った形式で返す[WebKitの既知不具合](https://bugs.webkit.org/show_bug.cgi?id=302253)に対応し、MP4へ格納する前に正しい音声設定を取り出します。読み取れない設定情報の場合は、無音の完成ファイルを渡さずエラーを表示します。
+
+音を短く確認する場合は、曲を読み込み、音楽が鳴る位置に移動して「5秒だけ試し書き出し」を押してください。現在位置付近を最大5秒、480p・24fps・音声付きで保存します。曲の最後に近い場合は末尾の5秒を使います。本番用の解像度・fps・音声ON/OFFの設定は変更しません。
+
 ## 音声を含む編集データ
 
 - 「保存」のJSONには、読み込み済みの曲を含めます。別の端末でも、そのJSONを「開く」で指定すれば曲と歌詞の時刻を復元できます。
@@ -283,5 +287,7 @@ python3 build.py
 音声入りJSON・ブラウザ再読込・無音書き出し防止・完成MP4の実音声の検証: `python3 dev/audio_project_workflow_test.py`（Playwright・Chromium・ffmpegが必要）。
 
 AAC非対応環境の検証: `JIZURA_FORCE_SOFTWARE_AAC=1 python3 dev/audio_project_workflow_test.py`。標準のAudioEncoder/AudioDataを無効にし、実際の書き出し音声がAACで非無音であることを検証します。
+
+SafariのAAC設定情報の回帰テスト: `python3 dev/safari_audio_workflow_test.py`。実際のAACパケットと既知不具合の設定情報で、修正前の音声デコード失敗・修正後の音声・モバイル幅の5秒書き出し操作を検証します。Safariのエンコーダー出力を再現したテストで、iPhone実機の検証ではありません。
 
 通常のビルドではAAC実行用ファイルを `vendor/aac-encoder.browser.js` に生成し、同じサイトから読み込みます。HTML単体で配布する場合は `python3 build.py --standalone` を使います。

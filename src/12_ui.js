@@ -212,6 +212,7 @@ function syncAudioStatus() {
   $('audioFile').disabled = !!S.exporting;
   $('btnSave').disabled = S.audioBusy || !!S.exporting;
   $('outAudio').disabled = $('eAudio').disabled = !!S.exporting;
+  $('btnSoundTest').disabled = S.audioBusy || !S.audio || !!S.exporting;
 }
 async function cacheAudio(project, file) {
   try { await J.projectAudio.store(project.audioAsset, file); }
@@ -880,7 +881,7 @@ async function codecNote() {
   $('btnMP4').disabled = !vc; $('eMP4').disabled = !vc;
   if (!vc) $('eMP4').title = 'このブラウザは MP4 書き出しに対応していません（Chrome / Edge 推奨）';
 }
-const EXP_BTNS = ['btnMP4', 'btnPNG', 'btnPNGA', 'eMP4'];
+const EXP_BTNS = ['btnMP4', 'btnPNG', 'btnPNGA', 'eMP4', 'btnSoundTest'];
 function baseName() { return ((S.project.title || 'jizura').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60) || 'jizura'); }
 let lastDownload = null;
 function showDownload(filename, blob, audioNote = '') {
@@ -899,15 +900,18 @@ async function offerDownload(filename, blob, audioNote = '') {
 }
 async function runExport(kind) {
   if (S.exporting) return;
-  if (S.audioBusy || (kind === 'mp4' && S.project.includeAudio !== false && !S.audio?.buffer)) {
+  const soundTest = kind === 'mp4test', mp4 = kind === 'mp4' || soundTest;
+  if (S.audioBusy || (mp4 && (soundTest || S.project.includeAudio !== false) && !S.audio?.buffer)) {
     audioNotice = S.audioBusy ? '曲の読み込みが終わってから書き出してください。' : '音声が未読込のため書き出しを止めました。「曲を読み込む」でMP3などを指定してください。';
     syncAudioStatus(); toast(audioNotice); return;
   }
   pause();
   if (S.tap) stopTap();
   const exportProject = JSON.parse(JSON.stringify(S.project));
-  const exportPlan = S.plan;
+  if (soundTest) Object.assign(exportProject, { includeAudio: true, res: 480, fps: 24, quality: 'standard' });
+  const exportPlan = soundTest ? { ...S.plan, fps: 24 } : S.plan;
   const exportAudio = exportProject.includeAudio !== false ? S.audio : null;
+  const range = soundTest ? { start: Math.max(0, Math.min(S.t, exportPlan.duration - 5)), duration: Math.min(5, exportPlan.duration) } : undefined;
   // Release the previous video before allocating another export.
   if (lastDownload) { lastDownload.dispose(); lastDownload = null; }
   $('downloadLink').removeAttribute('href'); $('downloadOpen').removeAttribute('href');
@@ -925,11 +929,11 @@ async function runExport(kind) {
   try {
     await prepareRecovery();
     await J.ensureFonts(S.project.lyrics + (S.project.title || '') + (S.project.artist || '') + HUD_CHARS, null);
-    if (kind === 'mp4') {
-      const r = await J.exportMP4({ plan: exportPlan, project: exportProject, audio: exportAudio, quality: exportProject.quality || 'high', onProgress, signal: ac.signal });
+    if (mp4) {
+      const r = await J.exportMP4({ plan: exportPlan, project: exportProject, audio: exportAudio, quality: exportProject.quality || 'high', onProgress, signal: ac.signal, range });
       txt.textContent = `完成 ${(r.blob.size / 1048576).toFixed(1)}MB・${r.codec}${r.audio ? ' + ' + r.audio.toUpperCase() : ''}・${((performance.now() - t0) / 1000).toFixed(0)}秒`;
       const audioNote = r.audio ? '音声入りのMP4です（AAC）。' : '「曲を動画に含める」がOFFのため、音声なしのMP4です。';
-      await offerDownload(baseName() + '.mp4', r.blob, audioNote);
+      await offerDownload(baseName() + (soundTest ? '_sound-test' : '') + '.mp4', r.blob, audioNote);
       txt.textContent += '・ダウンロードを押して保存';
     } else {
       const blob = await J.exportPNGZip({ plan: S.plan, project: S.project, transparent: kind === 'pnga', onProgress, signal: ac.signal });
@@ -941,8 +945,8 @@ async function runExport(kind) {
     console.error(e);
   } finally {
     S.exporting = null; S.need = true;
-    syncAudioStatus();
     EXP_BTNS.forEach(id => { $(id).disabled = false; });
+    syncAudioStatus();
     codecNote();
   }
 }
@@ -1373,6 +1377,7 @@ function bind() {
   $('outQuality').addEventListener('change', e => { S.project.quality = e.target.value; autosave(); });
   ['outAudio', 'eAudio'].forEach(id => $(id).addEventListener('change', e => { S.project.includeAudio = e.target.checked; audioNotice = ''; syncOut(); autosave(); }));
   $('btnMP4').addEventListener('click', () => runExport('mp4'));
+  $('btnSoundTest').addEventListener('click', () => runExport('mp4test'));
   $('btnPNG').addEventListener('click', () => runExport('png'));
   $('btnPNGA').addEventListener('click', () => runExport('pnga'));
   document.querySelectorAll('.exp-cancel').forEach(b => b.addEventListener('click', () => { if (S.exporting) S.exporting.abort(); }));
